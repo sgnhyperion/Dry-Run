@@ -1,0 +1,96 @@
+# Blender 4.3.0 MTL File: 'None'
+# www.blender.org
+
+newmtl Hair_Base
+Ns 0.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd C:/Users/MSI01/Downloads/IshowHeadobj/IHair_Hair_Base_BaseColorJPG.jpg
+map_Bump -bm 1.000000 C:/Users/MSI01/Downloads/IshowHeadobj/IHair_Hair_Base_NormalJPG.jpg
+
+newmtl Material.001
+Ns 0.000000
+Ka 1.000000 1.000000 1.000000
+Kd 0.800000 0.800000 0.800000
+Ks 0.000000 0.000000 0.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 1
+
+newmtl Std_Eye_R
+Ns 200.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.600000 0.600000 0.600000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd C:/Users/MSI01/Downloads/IshowHeadobj/C:/Std_Eye_R_Diffuse.jpg
+map_Bump -bm 1.000000 C:/Users/MSI01/Downloads/IshowHeadobj/C:/Std_Eye_R_Normal.jpg
+
+newmtl Std_Lower_Teeth
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.000000 0.000000 0.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 1
+map_Kd C:/Users/MSI01/Downloads/IshowHeadobj/C:/Std_Lower_Teeth_Diffuse.png
+
+newmtl Std_Skin_Head
+Ns 200.000000
+Ka 1.000000 1.000000 1.000000
+Kd 0.286275 0.231373 0.188235
+Ks 1.000000 1.000000 1.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Bump -bm 1.000000 C:/Users/MSI01/Downloads/IshowHeadobj/C:/Std_Skin_Head_Normal.png
+
+newmtl Std_Tearline_R
+Ns 10.000005
+Ka 1.000000 1.000000 1.000000
+Ks 0.000000 0.000000 0.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+illum 1
+map_Kd C:/Users/MSI01/Downloads/IshowHeadobj/C:/Std_Tearline_R_Diffuse.jpg
+map_d C:/Users/MSI01/Downloads/IshowHeadobj/C:/Std_Tearline_R_Opacity.jpg
+
+newmtl Std_Tongue
+Ns 20.000006
+Ka 1.000000 1.000000 1.000000
+Ks 0.000000 0.000000 0.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 1
+map_Kd C:/Users/MSI01/Downloads/IshowHeadobj/C:/Std_Tongue_Diffuse.jpg
+map_Bump -bm 1.000000 C:/Users/MSI01/Downloads/IshowHeadobj/C:/Std_Tongue_Normal.jpg
+
+newmtl Std_Upper_Teeth
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.000000 0.000000 0.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 1
+map_Kd C:/Users/MSI01/Downloads/IshowHeadobj/C:/Std_Upper_Teeth_Diffuse.jpg
+
+newmtl Toon_Eyebrows_Transparency
+Ns 1000.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.000000 0.000000 0.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 1
+map_Kd C:/Users/MSI01/Downloads/IshowHeadobj/C:/Toon_Eyebrows_Transparency_Diffuse.png

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>USD Viewer</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, user-scalable=no, viewport-fit=cover" />
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <meta name="twitter:card" content="summary"/>
+  <meta name="twitter:creator" content="https://autodesk-forks.github.io/USD/ and @hybridherbst"/>
+  <meta property="og:url" content="https://usd-viewer.glitch.me/" />
+  <meta property="og:title" content="USD Viewer" />
+  <meta property="og:description" content="Simple USD Viewer based on Autodesk's USD WASM Fork" />
+  <meta property="og:image" content="https://cdn.glitch.global/bee386a1-31e6-4710-8850-a1d5b7026a09/usd-viewer-preview2.webp?v=1646525510950" />
+  
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <script type="text/javascript" async src="modules/es-module-shims@1.8.0.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module" src="https://unpkg.com/three@0.163.0/build/three.module.js"></script>
+  <script type="module" src ="index.js"></script>
+  <script type="module">
+    import { init } from './index.js';
+    init();
+  </script>
+  <div id="container" style="position:absolute; margin:5px;">
+    <div class="buttons">
+    <a class="file" href="?file=">Clear<br/><span>Drop USDZ to load</span></a>
+  </div>
+  
+    
+    <p id="message-log">
+      Waiting for initialization to start...
+    </p>
+  </div>
+  <div class="footer">
+    <a id="quick-look-link" rel="ar" href="#"><img width="128" height="128" src="ARKit_Glyph.svg" title="ARKit Glyph" style="max-width:100%; height:auto;"></a>
+  </div>
+</body>
+</html>

@@ -1,0 +1,189 @@
+<!-- 
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>USD Viewer</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, user-scalable=no, viewport-fit=cover" />
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <meta name="twitter:card" content="summary"/>
+  <meta name="twitter:creator" content="https://autodesk-forks.github.io/USD/ and @hybridherbst"/>
+  <meta property="og:url" content="https://usd-viewer.glitch.me/" />
+  <meta property="og:title" content="USD Viewer" />
+  <meta property="og:description" content="Simple USD Viewer based on Autodesk's USD WASM Fork" />
+  <meta property="og:image" content="https://cdn.glitch.global/bee386a1-31e6-4710-8850-a1d5b7026a09/usd-viewer-preview2.webp?v=1646525510950" />
+  
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body>
+  <script type="text/javascript" async src="modules/es-module-shims@1.8.0.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module" src="https://unpkg.com/three@0.163.0/build/three.module.js"></script>
+  <script type="module" src="index2.js"></script>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const usdFile = params.get('file');
+    const avatarEmotion = params.get('emotion');
+    const avatarModel = params.get('avatarModel');
+
+    if (usdFile) {
+        // 1. ADD BACKGROUND: Set the 'bgs' parameter if it's not present
+        if (!params.has('bgs')) {
+            params.set('bgs', ''); 
+            console.log("Setting default background: bg7.usd");
+        }
+        
+        // 2. Add default camera positions if not set
+        if (!params.has('cameraX')) params.set('cameraX', '9');
+        if (!params.has('cameraY')) params.set('cameraY', '10');
+        if (!params.has('cameraZ')) params.set('cameraZ', '10');
+
+        // 3. Update the URL in the history state. This makes index2.js read the new 'bgs' param.
+        const newUrl = `${window.location.pathname}?${params.toString()}`;
+        history.replaceState(null, '', newUrl);
+
+        // 4. Set the link's href for the UI, but it's no longer used for triggering the load
+        const link = document.querySelector('a.file');
+        if (link) {
+             link.href = newUrl;
+        }
+
+        // 5. Parent window communication (Simplified)
+        window.addEventListener("message", (event) => {
+             if (event.data?.type === "PLAY" || event.data?.type === "RESET") {
+                 console.log(`USD command received from parent: ${event.data.type}`);
+                 // Your logic to control animation/reset would go here.
+             }
+        });
+    }
+    // Note: The original index2.js logic handles sending USD_LOADED after a file loads.
+    // We don't need the messy setInterval/click logic anymore.
+  </script>
+  <script type="module">
+    import { init } from './index2.js';
+    init(); // This now runs *after* the URL parameters are fixed
+  </script>
+
+  <div id="container" style="position:absolute; margin:5px;">
+    <div class="buttons">
+      <a class="file"></a> 
+    </div>  
+    <p id="message-log">
+      Waiting for initialization to start...
+    </p>
+  </div>
+
+  <div id="emotion-indicator" 
+     style="font-size: 1rem; position: fixed; bottom: 10px; right: 10px; z-index: 1000;">
+</div>
+
+  
+</body>
+
+</html>
+
+ -->
+
+
+ <!DOCTYPE html>
+<html>
+<head>
+  <title>USD Viewer</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, user-scalable=no, viewport-fit=cover" />
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <meta name="twitter:card" content="summary"/>
+  <meta name="twitter:creator" content="https://autodesk-forks.github.io/USD/ and @hybridherbst"/>
+  <meta property="og:url" content="https://usd-viewer.glitch.me/" />
+  <meta property="og:title" content="USD Viewer" />
+  <meta property="og:description" content="Simple USD Viewer based on Autodesk's USD WASM Fork" />
+  <meta property="og:image" content="https://cdn.glitch.global/bee386a1-31e6-4710-8850-a1d5b7026a09/usd-viewer-preview2.webp?v=1646525510950" />
+  
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body>
+  <script type="text/javascript" async src="modules/es-module-shims@1.8.0.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module" src="https://unpkg.com/three@0.163.0/build/three.module.js"></script>
+  <script type="module" src="index2.js"></script>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const usdFile = params.get('file');
+    const avatarEmotion = params.get('emotion');
+    const avatarModel = params.get('avatarModel');
+
+    // ⭐ PUPPETEER SPEED TRIGGER: Set flag if 'render=true' is in URL
+    if (params.get('render') === 'true') {
+        window.isExternallyControlled = true;
+    }
+
+    if (usdFile) {
+        // 1. ADD BACKGROUND: Set the 'bgs' parameter if it's not present
+        if (!params.has('bgs')) {
+            params.set('bgs', ''); 
+            console.log("Setting default background: bg7.usd");
+        }
+        
+        // 2. Add default camera positions if not set
+        if (!params.has('cameraX')) params.set('cameraX', '9');
+        if (!params.has('cameraY')) params.set('cameraY', '10');
+        if (!params.has('cameraZ')) params.set('cameraZ', '10');
+
+        // 3. Update the URL in the history state. This makes index2.js read the new 'bgs' param.
+        const newUrl = `${window.location.pathname}?${params.toString()}`;
+        history.replaceState(null, '', newUrl);
+
+        // 4. Set the link's href for the UI, but it's no longer used for triggering the load
+        const link = document.querySelector('a.file');
+        if (link) {
+             link.href = newUrl;
+        }
+
+        // 5. Parent window communication (Simplified)
+        window.addEventListener("message", (event) => {
+             if (event.data?.type === "PLAY" || event.data?.type === "RESET") {
+                 console.log(`USD command received from parent: ${event.data.type}`);
+                 // Your logic to control animation/reset would go here.
+             }
+        });
+    }
+  </script>
+  <script type="module">
+    import { init } from './index2.js';
+    init(); // This now runs *after* the URL parameters are fixed
+  </script>
+
+  <div id="container" style="position:absolute; margin:5px;">
+    <div class="buttons">
+      <a class="file"></a> 
+    </div>  
+    <p id="message-log">
+      Waiting for initialization to start...
+    </p>
+  </div>
+
+  <div id="emotion-indicator" 
+      style="font-size: 1rem; position: fixed; bottom: 10px; right: 10px; z-index: 1000;">
+</div>
+
+</body>
+</html>
