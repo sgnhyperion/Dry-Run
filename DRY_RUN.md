@@ -266,7 +266,9 @@ Audio ML (SER) · reward modeling / RLHF-adjacent (judge) · RL / bandits (best-
 ### Decided
 - **Framing/concept/thesis:** as above (locked).
 - **Frontend:** Next.js 15 (App Router) + React 19 + TypeScript + Tailwind (reuse existing scaffold).
-- **Avatar:** GLB (Ready Player Me) + three.js + **browser-side viseme lip-sync**. No USD, no A2F, no GPU.
+- **Avatar:** **VRM** (authored in **VRoid Studio**) + three.js via `@pixiv/three-vrm` + **browser-side viseme
+  lip-sync**. No USD, no A2F, no GPU. *(Pivoted from Ready Player Me — RPM shut down 2026-01-31; VRM also gives us
+  standardized emotion presets that Phase 4 affect reuses. See phase-1.md for the sample model + versions.)*
 - **LLM brain:** **Claude** (Anthropic API), latest model. (User has an Anthropic key.)
 - **Gut the legacy A2F/USD/Windows stack** (see §7).
 - **v1 feature scope:** core interview session + **shareable MP4 via in-browser MediaRecorder** (not Puppeteer).
@@ -413,7 +415,7 @@ real-time systems (voice), evaluation, and a measured research result. Deployed 
 - [ ] DB/vector: stay Firebase vs consolidate on Supabase+pgvector.
 - [ ] Embeddings provider for memory.
 - [ ] Deployment host (GCP vs AWS).
-- [ ] Avatar source (RPM default vs custom).
+- [x] Avatar source → **VRM / VRoid Studio** (RPM shut down 2026-01-31). Sample `public/avatar.vrm` for now.
 - [ ] SER dataset (RAVDESS / CREMA-D / IEMOCAP) + label scheme (discrete vs arousal/valence).
 - [ ] Judge-model base + how we produce human labels.
 - [ ] Coding-execution sandbox (how we run candidate code safely).
