@@ -30,9 +30,13 @@
 | 6 — Polish + deploy | ⚪ | — | Full-duplex/barge-in polish · Dockerize · deploy (GCP/AWS free tier) · write-up |
 
 ## Current focus
-**Phase 1, Milestone 1.2 — lip-sync.** (1.1 ✅ VRM avatar renders at `/studio`; RPM shut down so we use VRM +
-`@pixiv/three-vrm`. Key gotcha logged in phase-1.md: `reactStrictMode: false` was required — r3f + Suspense +
-Strict Mode double-mount crashed the WebGL context.) See [phase-1.md](phase-1.md).
+**Phase 1, Milestone 1.3 — the brain. ✅ Text interviewer working (2026-08-12):** `POST /api/interview` runs a
+coherent multi-turn interview — persona via `system_instruction`, dynamic input, and memory via Gemini's
+`previous_interaction_id` (caller chains the returned `id`). All model calls sit behind an `askBrain()` seam.
+(1.1 ✅ VRM avatar · 1.2 ✅ mic lip-sync at `/studio`.) On the **Gemini free tier** for now (no Anthropic credits);
+Claude swaps in via the seam later. **Next:** a minimal browser chat UI (the browser holds the `id` → "we own the
+state") → then streaming → then 1.4 TTS / 1.5 real-time voice. Harsh writes the code (mentor/co-pilot). PM = **pnpm**.
+See [phase-1.md](phase-1.md) for gotchas (`reactStrictMode: false`, three pinned `0.180.0`, RPM→VRM).
 
 ## Key locked decisions (see `/DRY_RUN.md` for full rationale)
 - Product: **Dry Run** — affective, self-improving AI technical interviewer (voice + 3D avatar).
