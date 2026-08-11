@@ -14,6 +14,25 @@ import { useEffect, useRef } from "react";
 
 const MODEL_URL = "/avatar.vrm"; // served from public/. Swap this file with your VRoid export later.
 
+// A shared box both the button (below) and the animation loop can read.
+// It'll hold the browser's live sound meter once the sound is turned on.
+let analyser: AnalyserNode | null = null;
+
+async function startMic() {
+  // ask the browser for microphone access (pops a permission prompt)
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+  //AudioContext = the browser's audio engine. We make one, then build a 
+  // "meter" (analyser) and plug the mic into it.
+  const ctx = new AudioContext();
+  const micSource = ctx.createMediaStreamSource(stream);
+  analyser = ctx.createAnalyser();
+  analyser.fftSize = 2048;
+  micSource.connect(analyser);
+
+  console.log("🎤 mic is on", analyser);
+}
+
 function VrmAvatar() {
   // useGLTF loads + caches a glTF/GLB. A .vrm IS a .glb with VRM extensions, but the base
   // GLTFLoader doesn't understand those extensions — so we register VRMLoaderPlugin on the
@@ -55,6 +74,18 @@ function VrmAvatar() {
     const blink = cycle > 3.85 ? Math.sin((cycle - 3.85) / 0.15 * Math.PI) : 0;
     vrm.expressionManager?.setValue("blink", blink);
 
+    if(analyser){
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+      analyser.getByteFrequencyData(dataArray);
+      const sum = dataArray.reduce((a, b) => a + b, 0);
+      const average = sum/bufferLength;
+      const normalizedAverage = average/255;
+      const mouth = 8*normalizedAverage
+      vrm.expressionManager?.setValue("aa", mouth);
+    }
+
+
     // Clamp delta: on the first frame (or after the tab is backgrounded) delta can be huge, which
     // makes spring-bone physics overshoot → vertices fly to NaN/infinity → the GPU crashes. Capping
     // at ~1/30s keeps the physics integrator stable no matter what.
@@ -76,6 +107,9 @@ function VrmAvatar() {
 export default function AvatarViewer() {
   return (
     <div className="h-screen w-screen bg-neutral-900">
+      <button onClick={startMic} style={{ position: "absolute", zIndex: 1, margin: 12, padding: "6px 12px" }}>
+        Start mic
+      </button>
       {/* camera: eye-level, ~1.4m up (VRM avatars are ~1.5m tall), pulled back 1.4m to frame the head+torso */}
       {/* dpr capped at 1.5: on a Retina Mac the default (2) renders 4x the pixels, which combined with */}
       {/* MToon's multi-pass shading exhausts the GPU and drops the WebGL context. 1.5 still looks crisp. */}

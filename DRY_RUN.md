@@ -3,6 +3,11 @@
 > **Living context document.** This is the single source of truth for the Dry Run project:
 > its purpose, rationale, architecture, decisions, and roadmap. Keep it updated as we build.
 > Last major update: 2026-08-04.
+>
+> **⚠️ IMPORTANT — Working mode (2026-08-06): MENTOR, not intern.** Harsh writes all implementation code
+> from here on. Claude guides only — explain concepts, give the approach/mental model, point to APIs/papers,
+> review and debug his code, unblock. Claude does **not** write or edit implementation code unless Harsh
+> explicitly asks for a specific piece. (Docs/memory upkeep by Claude is fine.)
 
 ---
 

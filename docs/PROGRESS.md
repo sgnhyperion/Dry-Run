@@ -6,6 +6,14 @@
 > **Convention:** starting a phase → create `docs/phase-N.md`; finishing a phase → update that doc into a
 > completed record and flip its status here.
 
+## ⚠️ IMPORTANT — Working mode (as of 2026-08-06): MENTOR, not intern
+**Harsh writes all the code from here on. Claude's role is to GUIDE, not build.**
+- Do **not** write/scaffold implementation code for him, and don't make the edits yourself.
+- Instead: explain concepts, give the mental model + approach, point to the right APIs/files/papers,
+  review his code, debug alongside him, and unblock — like a senior mentor pairing with an engineer.
+- Exceptions only if Harsh explicitly asks Claude to write a specific piece.
+- Rationale: maximize his hands-on learning in AI/ML/agents (the whole point of the project).
+
 ## Status legend
 🔵 in progress · ✅ done · ⚪ not started · ⏸️ paused
 
@@ -22,12 +30,14 @@
 | 6 — Polish + deploy | ⚪ | — | Full-duplex/barge-in polish · Dockerize · deploy (GCP/AWS free tier) · write-up |
 
 ## Current focus
-**Phase 1, Milestone 1.1** — get a Ready Player Me GLB avatar rendering in three.js. See [phase-1.md](phase-1.md).
+**Phase 1, Milestone 1.2 — lip-sync.** (1.1 ✅ VRM avatar renders at `/studio`; RPM shut down so we use VRM +
+`@pixiv/three-vrm`. Key gotcha logged in phase-1.md: `reactStrictMode: false` was required — r3f + Suspense +
+Strict Mode double-mount crashed the WebGL context.) See [phase-1.md](phase-1.md).
 
 ## Key locked decisions (see `/DRY_RUN.md` for full rationale)
 - Product: **Dry Run** — affective, self-improving AI technical interviewer (voice + 3D avatar).
 - Papers: Generative Agents (memory) + Reflexion (self-improvement) + SER (affect) + reward modeling + hybrid IR.
-- Stack: Next.js + three.js/GLB + **Claude** (Opus 4.8 / Sonnet 4.6) + **Supabase** (Postgres+pgvector) +
+- Stack: Next.js + three.js/**VRM** (`@pixiv/three-vrm`; RPM shut down 2026-01-31) + **Claude** (Opus 4.8 / Sonnet 4.6) + **Supabase** (Postgres+pgvector) +
   **Pipecat/LiveKit** (real-time voice) + Python FastAPI (SER + judge + embeddings) + Piston (code exec).
 - Non-goal: NOT a general assistant / Jarvis (kills measurability). Cross-device assistant = separate future project.
-- Working mode: **teach + pair**, especially on the ML parts. Don't autopilot.
+- Working mode: **MENTOR, not intern** — Harsh writes the code, Claude guides only (see the IMPORTANT block at top).
