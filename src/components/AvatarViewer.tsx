@@ -11,6 +11,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, useGLTF } from "@react-three/drei";
 import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 import { useEffect, useRef } from "react";
+import StartButton from "./StartButton";
 
 const MODEL_URL = "/avatar.vrm"; // served from public/. Swap this file with your VRoid export later.
 
@@ -107,9 +108,7 @@ function VrmAvatar() {
 export default function AvatarViewer() {
   return (
     <div className="h-screen w-screen bg-neutral-900">
-      <button onClick={startMic} style={{ position: "absolute", zIndex: 1, margin: 12, padding: "6px 12px" }}>
-        Start mic
-      </button>
+      <StartButton onStart={startMic} />
       {/* camera: eye-level, ~1.4m up (VRM avatars are ~1.5m tall), pulled back 1.4m to frame the head+torso */}
       {/* dpr capped at 1.5: on a Retina Mac the default (2) renders 4x the pixels, which combined with */}
       {/* MToon's multi-pass shading exhausts the GPU and drops the WebGL context. 1.5 still looks crisp. */}

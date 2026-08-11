@@ -37,3 +37,24 @@ body {
 .animate-fadeInOut {
   animation: fadeInOut 2s ease-in-out infinite;
 }
+
+@keyframes voice-wave {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+    opacity: 0.45;
+  }
+
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+.voice-wave {
+  width: 4px;
+  border-radius: 9999px;
+  background: rgb(167 139 250);
+  animation: voice-wave 0.8s ease-in-out infinite;
+  transform-origin: center;
+}
