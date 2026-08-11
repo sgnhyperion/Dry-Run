@@ -49,3 +49,5 @@ see-you-7ffec-firebase-adminsdk-ntqnb-617184660b.json
 /public/audio
 /public/renders
 *.usd
+
+/docs/*
