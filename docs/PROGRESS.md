@@ -30,12 +30,15 @@
 | 6 — Polish + deploy | ⚪ | — | Full-duplex/barge-in polish · Dockerize · deploy (GCP/AWS free tier) · write-up |
 
 ## Current focus
-**Phase 1, Milestone 1.3 — the brain. ✅ Text interviewer working (2026-08-12):** `POST /api/interview` runs a
-coherent multi-turn interview — persona via `system_instruction`, dynamic input, and memory via Gemini's
-`previous_interaction_id` (caller chains the returned `id`). All model calls sit behind an `askBrain()` seam.
+**Phase 1, Milestone 1.3 — the brain. ✅ COMPLETE (2026-08-13).** Full text interviewer working: `POST /api/interview`
+→ LLM behind an `askBrain()` seam → interviewer persona (`system_instruction`) → multi-turn memory (Gemini
+`previous_interaction_id`) → a browser chat UI + **full-transcript history** at `/interview` (browser holds the `id`).
 (1.1 ✅ VRM avatar · 1.2 ✅ mic lip-sync at `/studio`.) On the **Gemini free tier** for now (no Anthropic credits);
-Claude swaps in via the seam later. **Next:** a minimal browser chat UI (the browser holds the `id` → "we own the
-state") → then streaming → then 1.4 TTS / 1.5 real-time voice. Harsh writes the code (mentor/co-pilot). PM = **pnpm**.
+Claude swaps in via the seam later. **▶ Milestone 1.4 (voice out / TTS) — IN PROGRESS.** Stage A (current): speak the
+reply via browser `SpeechSynthesis` (a `speak()` in `handleSend` — quick "hear it" win, but a dead-end for the avatar).
+Stage B (next): a real TTS returning audio → `AnalyserNode` → the 1.2 `aa` viseme so the avatar lip-syncs (bridges
+`/interview` ↔ `/studio`). Streaming deferred. NOTE: `/interview` UI was built by a *separate* AI agent — Harsh owns
+the logic, not the UI. Harsh writes the code (mentor/co-pilot). PM = **pnpm**.
 See [phase-1.md](phase-1.md) for gotchas (`reactStrictMode: false`, three pinned `0.180.0`, RPM→VRM).
 
 ## Key locked decisions (see `/DRY_RUN.md` for full rationale)

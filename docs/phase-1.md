@@ -33,8 +33,9 @@ Built incrementally so each step is visible and understood (teach + pair mode).
 - Google Cloud TTS **or** Kokoro (1.4), streaming STT provider (1.5) — deferred to those milestones.
 
 ## Current step
-**1.3 — the brain. ✅ First light achieved (2026-08-11).** The Next.js API route now calls a real LLM
-server-side and returns a genuine interviewer question as JSON. (1.1 ✅ avatar · 1.2 ✅ lip-sync at `/studio`.)
+**1.3 — the brain. ✅ COMPLETE (2026-08-13).** Full text interviewer: API route → LLM behind an `askBrain()`
+seam → interviewer persona → multi-turn memory → a polished browser chat UI at `/interview`. (1.1 ✅ avatar ·
+1.2 ✅ lip-sync at `/studio`.) **Now starting → 1.4 voice out (TTS).**
 - **What works:** `GET /api/interview` → `src/app/api/interview/route.ts` → calls the model with one hard-coded
   prompt → returns `{ reply: "<question>" }`. Verified in-browser (got a real neural-speech-synthesis question).
   Harsh wrote the call + text-extraction himself (co-pilot method).
@@ -52,8 +53,31 @@ server-side and returns a genuine interviewer question as JSON. (1.1 ✅ avatar 
   that `id`) — fine for now, but it's provider-locked and doesn't hand us the transcript. The model itself stays
   *stateless*: whatever the store, history is linearized into the context window each call (→ finite window → the
   whole point of Phase 2 memory: store rich, retrieve+linearize a relevant slice). Phase 2 + the Claude swap move
-  to a client/DB-owned transcript we replay ourselves. Still TODO: (e) **stream** the reply; wire browser ↔ route
-  (a text chat UI where the *browser* holds the `id` → then 1.4 TTS → 1.2 lip-sync; 1.5 real-time loop).
+  to a client/DB-owned transcript we replay ourselves. ✅ **Browser chat UI** built at `/interview` (2026-08-13,
+  `src/app/interview/page.tsx`): the *browser* holds the `id` in `previousId` state and chains it automatically (the
+  "we own the handle" version). Harsh went well beyond the scaffold — `loading` + thinking-wave, `try/catch` error
+  state, a `canSend` guard, Enter-to-send / Shift+Enter, Tailwind styling. Multi-turn verified in-browser ("can you
+  rephrase that?" → it rephrased its own prior question). Key insight: `previousId` = state that drives *behavior*
+  (memory), `reply` = state that drives the *view* (display only, never sent to the server). **1.3 DONE.**
+  Deferred (optional): (e) **stream** the reply — nice-to-have for latency, more valuable once voice is in.
+- ✅ **Chat history transcript (2026-08-14):** `/interview` now keeps a `messages: {role,text}[]` state array (seeded
+  with a greeting), appends the user's line *immediately* + the interviewer's reply after the await — both via the
+  functional updater `setMessages(prev => [...prev, …])`; captures `const answer = message` *before* clearing the input
+  and sends `answer` (not the cleared state). Lesson landed: React state is immutable (replace, don't `push`), and the
+  functional updater avoids the stale-closure overwrite when appending twice in one handler. Transcript display is
+  independent of the model's memory (`previousId`). ⚠️ NOTE: the `/interview` page's **UI/styling/animations were built
+  by a *separate* AI agent** — Harsh owns the **logic**, not the UI (calibrate mentoring accordingly).
+- **▶ IN PROGRESS — 1.4 voice out (TTS):** speak the interviewer's reply aloud, then route that audio into the 1.2
+  `AnalyserNode` so the avatar's mouth moves in time.
+  - **Stage A — CURRENT tiny step (not yet done):** in `handleSend`, right after appending the interviewer reply, add
+    `const u = new SpeechSynthesisUtterance(data.text); window.speechSynthesis.speak(u);` — browser-native `SpeechSynthesis`,
+    no key/server, just to *hear* it. (Known dead-end for the avatar — SpeechSynthesis exposes no audio node to analyze —
+    but a fast confidence win. Predictions posed: does it need a key/server? does it speak user msgs or only interviewer?)
+  - **Stage B — next:** swap to a real TTS that returns an audio buffer/stream (candidates: Kokoro self-host, ElevenLabs
+    free tier, or Gemini/Google TTS — verify a genuinely free option) → play via `<audio>`/`MediaElementSource` →
+    **AnalyserNode** → speakers, reusing 1.2's amplitude→`aa` viseme so the avatar lip-syncs the voice (bridges
+    `/interview` ↔ `/studio`). This is the real product bridge.
+  - Deferred: streaming the reply (latency polish; matters more once voice is in).
 
 ## Decisions / notes (fill in as we build)
 - **Brain provider (2026-08-11, budget-driven):** Anthropic API has no free tier (needs ~$5 credits) and Harsh has
