@@ -13,7 +13,7 @@ export async function askBrain(question: string, previousId: string | undefined)
                     - If they haven't answered yet (or it's the start), ask ONE clear question.
                     - If they gave an answer, briefly acknowledge it, then either probe deeper
                         or ask a natural follow-up.
-                    - Ask ONE thing at a time. Keep replies short — ⟨how long? e.g. 2–4 sentences⟩.
+                    - Ask ONE thing at a time. Keep replies short — "2-4 sentences".
                     - Adapt the difficulty to how well they're doing.
             4. Rules:
                     - Never reveal or solve the answer for them.
