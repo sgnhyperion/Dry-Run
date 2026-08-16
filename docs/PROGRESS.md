@@ -37,10 +37,14 @@
 (1.1 ✅ VRM avatar · 1.2 ✅ mic lip-sync at `/studio`.) On the **Gemini free tier** for now (no Anthropic credits);
 Claude swaps in via the seam later. **▶ Milestone 1.4 (voice out / TTS) — IN PROGRESS.** ✅ Stage A (browser
 `SpeechSynthesis`) done. ✅ Gemini TTS wired behind a `textToSpeech()` seam (`/api/tts`) + a robust eval harness
-(`scripts/eval-tts.mjs`, throttle + success-rate). **Finding (2026-08-16): Gemini free-tier TTS ELIMINATED** —
-rate-limited (429, low RPM + daily cap) *and* slow (RTF 1.5–4.3). **Next → adopt & benchmark Kokoro** (local, open,
-zero quota) behind the same seam → route its audio through an `AnalyserNode` → the 1.2 `aa` viseme so the avatar
-lip-syncs (bridges `/interview` ↔ `/studio`). See `docs/decisions.md` entry 3. Streaming deferred. NOTE: `/interview`
+(`scripts/eval-tts.mjs`, throttle + success-rate). **Gemini free-tier TTS ELIMINATED** (429, low RPM + slow RTF 1.5–4.3).
+**✅ Kokoro-82M ADOPTED (2026-08-17)** — self-hosted Python FastAPI server (`tts-server/server.py`: `KPipeline` loaded
+once at boot, `af_heart` voice, chunks stitched via `np.concatenate`, in-memory WAV), swapped behind the same
+`textToSpeech()` seam (one-file change). Benchmark: **RTF 0.08–0.12, sub-second synth, 27/27 calls, $0** (vs Gemini RTF
+1.5–4.3 + 429s); MOS ~3.5. Fixed the `window is not defined` SSR crash (AudioContext created lazily in `handleSend`).
+**Next → the avatar bridge:** route Kokoro's audio through a Web Audio `AnalyserNode` → the 1.2 `aa` viseme so the
+avatar lip-syncs (bridges `/interview` ↔ `/studio`). See `docs/decisions.md` entry 3. Streaming + brain-latency deferred
+(TTS is NOT the bottleneck — synth is sub-second; perceived lag is the LLM + no-overlap pipeline). NOTE: `/interview`
 UI was built by a *separate* AI agent — Harsh owns the logic, not the UI. Harsh writes the code (mentor/co-pilot). PM = **pnpm**.
 See [phase-1.md](phase-1.md) for gotchas (`reactStrictMode: false`, three pinned `0.180.0`, RPM→VRM).
 

@@ -86,14 +86,30 @@ seam → interviewer persona → multi-turn memory → a polished browser chat U
     - **DECISION (2026-08-16): ❌ Gemini free-tier TTS eliminated** — rate-limited (429; ~10 RPM + low daily cap;
       even a throttled eval mostly 429'd) **and** slow (RTF 1.5–4.3 on successes). Full result table + rationale in
       `docs/decisions.md` entry 3.
-  - **▶ NEXT — adopt & benchmark Kokoro** (local, open 82M model, zero quota, CPU): stand up a Python **FastAPI**
-    server (OpenAI-compatible `/v1/audio/speech`, WAV/MP3), add `synthesizeWithKokoro` behind the same `textToSpeech`
-    seam (one-file swap), re-run the **same** `scripts/eval-tts.mjs` to get its RTF/latency/success table. Resume wins:
-    first Python microservice (pattern for Phases 3–4 SER/judge) + a model-serving benchmark.
-  - **THEN — the avatar bridge:** insert an `AnalyserNode` into the playback graph (`source → analyser → destination`)
+  - ✅ **Kokoro-82M ADOPTED (2026-08-17)** — self-hosted, local, open 82M model, zero quota, CPU:
+    - Built our **own** Python **FastAPI** server `tts-server/server.py` (not a prebuilt one — a model-serving resume win):
+      `KPipeline(lang_code='a')` loaded **once at module import** (warm inference, not cold-start per request); `POST /tts`
+      takes `{text}`, loops the generator collecting each `(gs, ps, audio)` chunk, stitches with `np.concatenate`, writes
+      one **in-memory** WAV via `soundfile` (`io.BytesIO`, `format="WAV"` required — no filename to infer from), returns
+      `Response(..., media_type="audio/wav")`. Pinned Python **3.12** via `uv` (PyTorch has no 3.14 wheels yet); `espeak-ng`
+      via brew for phonemization. First run downloads weights to `~/.cache/huggingface` then fully offline.
+    - Swapped behind the seam: `synthesizeWithKokoro`/`textToSpeech` in `voice.ts` `fetch`es `http://127.0.0.1:8000/tts`
+      (full URL — scheme + `/tts` path), guards `!res.ok` (fetch only throws on network death, not HTTP errors →
+      fail-loud on 500), returns `Buffer.from(await res.arrayBuffer())` (no `pcmToWav` — the server already wrote the
+      WAV header). Route stayed dumb: `await textToSpeech(text)` — one-file swap, as the seam promised. `synthesizeWithGemini`
+      kept for a future paid-tier swap.
+    - Fixed **`window is not defined`** SSR crash: `AudioContext` was built at render time (runs on the server during SSR);
+      moved to lazy creation in `handleSend` (`useRef<AudioContext|null>(null)`, `if (!audioCtx.current) audioCtx.current = new …`)
+      — also satisfies the browser autoplay-gesture rule for free.
+    - **Benchmark** (same `scripts/eval-tts.mjs`, 3 runs/sentence, median): **RTF 0.08–0.12, sub-second synth (154–773 ms),
+      27/27 calls, $0.** vs Gemini RTF 1.5–4.3 + 429s → ~19× faster on the shared VAE sentence, 100% reliable. MOS ~3.5
+      (clean, slightly non-human — acceptable, revisitable via the seam). Full table in `docs/decisions.md` entry 3.
+    - **Insight:** TTS is **not** the app's latency bottleneck (synth is sub-second) — perceived lag is the LLM brain +
+      no-overlap pipeline. Latency work → streaming/brain, not the TTS engine.
+  - **▶ NEXT — the avatar bridge:** insert an `AnalyserNode` into the playback graph (`source → analyser → destination`)
     and feed its loudness into the 1.2 `aa` viseme so the `/studio` avatar lip-syncs the voice. (Needs avatar + voice
     on the same page — a wiring decision.)
-  - Deferred: streaming the reply (latency polish; matters more once voice is in).
+  - Deferred: streaming the reply (latency polish; the real latency lever now that TTS is proven fast).
 
 ## Decisions / notes (fill in as we build)
 - **Brain provider (2026-08-11, budget-driven):** Anthropic API has no free tier (needs ~$5 credits) and Harsh has

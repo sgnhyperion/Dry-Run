@@ -12,8 +12,7 @@ export default function InterviewPage() {
   ]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // const audioCtx = useRef(new (window.AudioContext || (window as any).webkitAudioContext)());
-  const audioCtx = useRef(new (window.AudioContext || (window as any).webkitAudioContext)()).current;
+  const audioCtx = useRef<AudioContext | null>(null);
 
   const canSend = !!message?.trim() && !loading;
 
@@ -25,6 +24,9 @@ export default function InterviewPage() {
 
   const handleSend = async () => {
     if (!canSend) return;
+    if (!audioCtx.current) {
+      audioCtx.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
     const answer = message!.trim();
     setLoading(true);
     setError(null);

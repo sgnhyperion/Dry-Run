@@ -1,6 +1,7 @@
 import {GoogleGenAI} from '@google/genai';
+const ttsKokoroUrl = "http://127.0.0.1:8000/tts"
 
-export async function textToSpeech(text: string) {
+export async function synthesizeWithGemini(text: string) {
    const client = new GoogleGenAI({});
 
    try {
@@ -25,9 +26,30 @@ export async function textToSpeech(text: string) {
 
         return wavBuffer;
    } catch (error) {
-        console.error("Error in textToSpeech:", error);
+        console.error("Error in synthesizeWithGemini:", error);
         return new Response("Error generating speech", { status: 500 });
    }
+}
+
+export async function textToSpeech(text: string){
+    try {
+        const res = await fetch(ttsKokoroUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: text }),
+        })
+
+        if(!res.ok){
+            throw new Error(`Kokoro TTS failed (${res.status})`);
+        }
+
+        const wavBuffer = await res.arrayBuffer();
+
+        return wavBuffer;
+    } catch (error) {
+        console.error("Error in textToSpeech:", error);
+        return new Response("Error generating speech", { status: 500 });
+    }
 }
 
 function pcmToWav(pcm: Buffer, sampleRate = 24000, channels = 1, bitsPerSample = 16): Buffer {
