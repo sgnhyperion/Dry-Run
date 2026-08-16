@@ -2,6 +2,7 @@
 
 > Single source of truth for **where we are**. Each phase has its own doc in `docs/phase-N.md`.
 > Master design/architecture lives in `/DRY_RUN.md`.
+> Tool/model choices (with rationale + eval stats) live in `docs/decisions.md` (ADR-style decision log).
 >
 > **Convention:** starting a phase → create `docs/phase-N.md`; finishing a phase → update that doc into a
 > completed record and flip its status here.
@@ -34,11 +35,13 @@
 → LLM behind an `askBrain()` seam → interviewer persona (`system_instruction`) → multi-turn memory (Gemini
 `previous_interaction_id`) → a browser chat UI + **full-transcript history** at `/interview` (browser holds the `id`).
 (1.1 ✅ VRM avatar · 1.2 ✅ mic lip-sync at `/studio`.) On the **Gemini free tier** for now (no Anthropic credits);
-Claude swaps in via the seam later. **▶ Milestone 1.4 (voice out / TTS) — IN PROGRESS.** Stage A (current): speak the
-reply via browser `SpeechSynthesis` (a `speak()` in `handleSend` — quick "hear it" win, but a dead-end for the avatar).
-Stage B (next): a real TTS returning audio → `AnalyserNode` → the 1.2 `aa` viseme so the avatar lip-syncs (bridges
-`/interview` ↔ `/studio`). Streaming deferred. NOTE: `/interview` UI was built by a *separate* AI agent — Harsh owns
-the logic, not the UI. Harsh writes the code (mentor/co-pilot). PM = **pnpm**.
+Claude swaps in via the seam later. **▶ Milestone 1.4 (voice out / TTS) — IN PROGRESS.** ✅ Stage A (browser
+`SpeechSynthesis`) done. ✅ Gemini TTS wired behind a `textToSpeech()` seam (`/api/tts`) + a robust eval harness
+(`scripts/eval-tts.mjs`, throttle + success-rate). **Finding (2026-08-16): Gemini free-tier TTS ELIMINATED** —
+rate-limited (429, low RPM + daily cap) *and* slow (RTF 1.5–4.3). **Next → adopt & benchmark Kokoro** (local, open,
+zero quota) behind the same seam → route its audio through an `AnalyserNode` → the 1.2 `aa` viseme so the avatar
+lip-syncs (bridges `/interview` ↔ `/studio`). See `docs/decisions.md` entry 3. Streaming deferred. NOTE: `/interview`
+UI was built by a *separate* AI agent — Harsh owns the logic, not the UI. Harsh writes the code (mentor/co-pilot). PM = **pnpm**.
 See [phase-1.md](phase-1.md) for gotchas (`reactStrictMode: false`, three pinned `0.180.0`, RPM→VRM).
 
 ## Key locked decisions (see `/DRY_RUN.md` for full rationale)

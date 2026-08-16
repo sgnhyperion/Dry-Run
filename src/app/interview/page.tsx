@@ -12,6 +12,8 @@ export default function InterviewPage() {
   ]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // const audioCtx = useRef(new (window.AudioContext || (window as any).webkitAudioContext)());
+  const audioCtx = useRef(new (window.AudioContext || (window as any).webkitAudioContext)()).current;
 
   const canSend = !!message?.trim() && !loading;
 
@@ -38,6 +40,29 @@ export default function InterviewPage() {
       const data = await response.json();
       setMessages((prev) => [...prev, { role: "interviewer", text: data.text }]);
       setPreviousId(data.id); // thread the next turn
+
+      const ttsResponse = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: data.text }),
+      });
+
+      if (!ttsResponse.ok) throw new Error(`TTS request failed (${ttsResponse.status})`);
+      const ttsBuffer = await ttsResponse.arrayBuffer();
+
+      // 2. Decode the raw WAV ArrayBuffer into an AudioBuffer
+      const audioBuffer = await audioCtx.decodeAudioData(ttsBuffer);
+      
+      // 3. Create a buffer source node
+      const source = audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      
+      // 4. Connect the source to the browser speakers and play
+      source.connect(audioCtx.destination);
+      source.start(0);
+
+      // const utterance = new SpeechSynthesisUtterance(data.text);
+      // window.speechSynthesis.speak(utterance);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {

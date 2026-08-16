@@ -69,14 +69,30 @@ seam → interviewer persona → multi-turn memory → a polished browser chat U
   by a *separate* AI agent** — Harsh owns the **logic**, not the UI (calibrate mentoring accordingly).
 - **▶ IN PROGRESS — 1.4 voice out (TTS):** speak the interviewer's reply aloud, then route that audio into the 1.2
   `AnalyserNode` so the avatar's mouth moves in time.
-  - **Stage A — CURRENT tiny step (not yet done):** in `handleSend`, right after appending the interviewer reply, add
-    `const u = new SpeechSynthesisUtterance(data.text); window.speechSynthesis.speak(u);` — browser-native `SpeechSynthesis`,
-    no key/server, just to *hear* it. (Known dead-end for the avatar — SpeechSynthesis exposes no audio node to analyze —
-    but a fast confidence win. Predictions posed: does it need a key/server? does it speak user msgs or only interviewer?)
-  - **Stage B — next:** swap to a real TTS that returns an audio buffer/stream (candidates: Kokoro self-host, ElevenLabs
-    free tier, or Gemini/Google TTS — verify a genuinely free option) → play via `<audio>`/`MediaElementSource` →
-    **AnalyserNode** → speakers, reusing 1.2's amplitude→`aa` viseme so the avatar lip-syncs the voice (bridges
-    `/interview` ↔ `/studio`). This is the real product bridge.
+  - ✅ **Stage A done:** browser `SpeechSynthesis` in `handleSend` (`new SpeechSynthesisUtterance(data.text)` +
+    `speechSynthesis.speak`). Confirmed it talks. Known dead-end for the avatar (exposes no audio node to analyze) —
+    just a "hear it" win.
+  - ✅ **Stage B partly done — Gemini TTS wired then eliminated:**
+    - Built the seam `src/lib/voice.ts` → `textToSpeech(text)` (Gemini `gemini-3.1-flash-tts-preview`,
+      `response_format:{type:'audio'}`, `generation_config.speech_config:[{voice:'Kore'}]` → base64 PCM →
+      `pcmToWav` → WAV `Buffer`) + route `src/app/api/tts/route.ts` (POST → `new Response(new Uint8Array(wav),
+      {'Content-Type':'audio/wav'})`). Seam now **fails loud** (throws on empty audio; the old `?? ''` hid failures).
+    - `/interview/page.tsx` `handleSend` calls `/api/tts`, `decodeAudioData`s the WAV, plays via an
+      `AudioBufferSourceNode` → (currently straight to `destination`; **no AnalyserNode yet** — that's the remaining bridge).
+      Fixed bugs there: moved `setPreviousId` before the TTS call (a TTS error was skipping memory-threading),
+      request `Content-Type: application/json`, absolute `/api/tts`, and reuse one `AudioContext` (don't `new` per send).
+    - Built a **robust eval harness** `scripts/eval-tts.mjs` (fixed test set, throttle ~8/min, per-call failure
+      detection, median of successes, honest `ok: x/RUNS` column, duration from byte count).
+    - **DECISION (2026-08-16): ❌ Gemini free-tier TTS eliminated** — rate-limited (429; ~10 RPM + low daily cap;
+      even a throttled eval mostly 429'd) **and** slow (RTF 1.5–4.3 on successes). Full result table + rationale in
+      `docs/decisions.md` entry 3.
+  - **▶ NEXT — adopt & benchmark Kokoro** (local, open 82M model, zero quota, CPU): stand up a Python **FastAPI**
+    server (OpenAI-compatible `/v1/audio/speech`, WAV/MP3), add `synthesizeWithKokoro` behind the same `textToSpeech`
+    seam (one-file swap), re-run the **same** `scripts/eval-tts.mjs` to get its RTF/latency/success table. Resume wins:
+    first Python microservice (pattern for Phases 3–4 SER/judge) + a model-serving benchmark.
+  - **THEN — the avatar bridge:** insert an `AnalyserNode` into the playback graph (`source → analyser → destination`)
+    and feed its loudness into the 1.2 `aa` viseme so the `/studio` avatar lip-syncs the voice. (Needs avatar + voice
+    on the same page — a wiring decision.)
   - Deferred: streaming the reply (latency polish; matters more once voice is in).
 
 ## Decisions / notes (fill in as we build)
