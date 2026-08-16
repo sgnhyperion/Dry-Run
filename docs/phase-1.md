@@ -106,9 +106,23 @@ seam → interviewer persona → multi-turn memory → a polished browser chat U
       (clean, slightly non-human — acceptable, revisitable via the seam). Full table in `docs/decisions.md` entry 3.
     - **Insight:** TTS is **not** the app's latency bottleneck (synth is sub-second) — perceived lag is the LLM brain +
       no-overlap pipeline. Latency work → streaming/brain, not the TTS engine.
-  - **▶ NEXT — the avatar bridge:** insert an `AnalyserNode` into the playback graph (`source → analyser → destination`)
-    and feed its loudness into the 1.2 `aa` viseme so the `/studio` avatar lip-syncs the voice. (Needs avatar + voice
-    on the same page — a wiring decision.)
+  - ✅ **Avatar bridge DONE (2026-08-17) — the talking spine is closed.** Avatar now lip-syncs the interviewer's
+    spoken TTS on `/interview`:
+    - **Shared audio bus** `src/lib/lipsync.ts` → `export const lipSync = { analyser: null }`. An **object** (not
+      `export let`) on purpose: ES-module imports are live *read-only* bindings — an importer can't reassign one, but it
+      *can* mutate a property. Producer (mic OR TTS) sets `lipSync.analyser`; the avatar's `useFrame` loop reads it each frame.
+      Key insight: the render loop is a **puller** — it's agnostic to what fills the box (mic in 1.2, TTS now).
+    - `AvatarViewer` refactored to read/write the shared box (deleted its private `let analyser`; `startMic` and the loop
+      both use `lipSync.analyser`). Added a `showMic` prop → mic `StartButton` renders only on `/studio`; `/interview`
+      passes nothing (no mic → TTS keeps the box). Loop gained an `else setValue("aa", 0)` so an empty box rests the mouth shut.
+    - Avatar mounted on `/interview` via `dynamic(() => import(...), { ssr: false })` — WebGL/three.js is browser-only
+      (no `window`/canvas/GPU on the Node server); `"use client"` alone still SSRs once, so `ssr:false` is required to skip
+      the server pass entirely. (`dynamic ssr:false` is only allowed inside a Client Component — `page.tsx` already is one.)
+    - **The bridge itself:** in `handleSend`, spliced an `AnalyserNode` inline — `source → analyser → destination` — so the
+      TTS audio is *heard* (reaches `destination`) **and** *measured* (analyser taps loudness) at once; set `lipSync.analyser
+      = analyser`, and `source.onended = () => { lipSync.analyser = null }` to clear on end. (Contrast the mic path
+      `mic → analyser` with **no** destination — deliberately dead-ended to avoid acoustic feedback / howl.)
+    - **Result:** full Phase-1 loop working — type → Gemini brain → local Kokoro TTS → sound + synced avatar mouth.
   - Deferred: streaming the reply (latency polish; the real latency lever now that TTS is proven fast).
 
 ## Decisions / notes (fill in as we build)

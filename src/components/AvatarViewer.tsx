@@ -12,12 +12,12 @@ import { OrbitControls, useGLTF } from "@react-three/drei";
 import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 import { useEffect, useRef } from "react";
 import StartButton from "./StartButton";
+import { lipSync } from "@/lib/lipsync";
 
 const MODEL_URL = "/avatar.vrm"; // served from public/. Swap this file with your VRoid export later.
 
 // A shared box both the button (below) and the animation loop can read.
 // It'll hold the browser's live sound meter once the sound is turned on.
-let analyser: AnalyserNode | null = null;
 
 async function startMic() {
   // ask the browser for microphone access (pops a permission prompt)
@@ -27,9 +27,10 @@ async function startMic() {
   // "meter" (analyser) and plug the mic into it.
   const ctx = new AudioContext();
   const micSource = ctx.createMediaStreamSource(stream);
-  analyser = ctx.createAnalyser();
+  const analyser = ctx.createAnalyser();
   analyser.fftSize = 2048;
   micSource.connect(analyser);
+  lipSync.analyser = analyser
 
   console.log("🎤 mic is on", analyser);
 }
@@ -75,15 +76,17 @@ function VrmAvatar() {
     const blink = cycle > 3.85 ? Math.sin((cycle - 3.85) / 0.15 * Math.PI) : 0;
     vrm.expressionManager?.setValue("blink", blink);
 
-    if(analyser){
-      const bufferLength = analyser.frequencyBinCount;
+    if(lipSync.analyser){
+      const bufferLength = lipSync.analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
-      analyser.getByteFrequencyData(dataArray);
+      lipSync.analyser.getByteFrequencyData(dataArray);
       const sum = dataArray.reduce((a, b) => a + b, 0);
       const average = sum/bufferLength;
       const normalizedAverage = average/255;
       const mouth = 8*normalizedAverage
       vrm.expressionManager?.setValue("aa", mouth);
+    } else {
+      vrm.expressionManager?.setValue("aa", 0);   // no signal → close mouth
     }
 
 
@@ -105,10 +108,10 @@ function VrmAvatar() {
 // VRMLoaderPlugin, so a later useGLTF(...) with the plugin would get the cached pluginless glTF
 // (userData.vrm === undefined). Skipping preload keeps the plugin-registered load as the only one.
 
-export default function AvatarViewer() {
+export default function AvatarViewer({ showMic = true }: { showMic?: boolean }) {
   return (
-    <div className="h-screen w-screen bg-neutral-900">
-      <StartButton onStart={startMic} />
+    <div className="relative h-full w-full bg-gradient-to-b from-[#161829] to-[#0b0c14]">
+      { showMic && <StartButton onStart={startMic} />}
       {/* camera: eye-level, ~1.4m up (VRM avatars are ~1.5m tall), pulled back 1.4m to frame the head+torso */}
       {/* dpr capped at 1.5: on a Retina Mac the default (2) renders 4x the pixels, which combined with */}
       {/* MToon's multi-pass shading exhausts the GPU and drops the WebGL context. 1.5 still looks crisp. */}

@@ -1,0 +1,1 @@
+export const lipSync = { analyser: null as AnalyserNode | null };
