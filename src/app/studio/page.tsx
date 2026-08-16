@@ -15,5 +15,9 @@ const AvatarViewer = dynamic(() => import("@/components/AvatarViewer"), {
 });
 
 export default function StudioPage() {
-  return <AvatarViewer />;
+  return (
+    <div className="h-screen w-screen">
+      <AvatarViewer />
+    </div>
+  );
 }

@@ -11,9 +11,9 @@ export default function StartButton({ onStart }: StartButtonProps) {
       aria-label="Start microphone"
       className="
         group
-        absolute left-12 top-8 z-10
+        absolute bottom-4 left-1/2 z-10 -translate-x-1/2
 
-        flex h-20 w-20
+        flex h-16 w-16
         items-center justify-center
         rounded-full
 

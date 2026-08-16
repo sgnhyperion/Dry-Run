@@ -1,35 +1,35 @@
 import {GoogleGenAI} from '@google/genai';
 const ttsKokoroUrl = "http://127.0.0.1:8000/tts"
 
-export async function synthesizeWithGemini(text: string) {
-   const client = new GoogleGenAI({});
+// export async function textToSpeech(text: string) {
+//    const client = new GoogleGenAI({});
 
-   try {
-        const interaction = await client.interactions.create({
-        model: "gemini-3.1-flash-tts-preview",
-        input: text,
-        response_format: { type: 'audio' },
-        generation_config: {
-            speech_config: [
-                { voice: 'Kore' }
-            ]
-        },
-        });
+//    try {
+//         const interaction = await client.interactions.create({
+//         model: "gemini-3.1-flash-tts-preview",
+//         input: text,
+//         response_format: { type: 'audio' },
+//         generation_config: {
+//             speech_config: [
+//                 { voice: 'Kore' }
+//             ]
+//         },
+//         });
 
-        if (!interaction?.output_audio?.data) {
-            throw new Error("No audio data returned from TTS model");
-        }
+//         if (!interaction?.output_audio?.data) {
+//             throw new Error("No audio data returned from TTS model");
+//         }
 
-        const audioBuffer = Buffer.from(interaction?.output_audio?.data, 'base64');
+//         const audioBuffer = Buffer.from(interaction?.output_audio?.data, 'base64');
 
-        const wavBuffer = pcmToWav(audioBuffer);
+//         const wavBuffer = pcmToWav(audioBuffer);
 
-        return wavBuffer;
-   } catch (error) {
-        console.error("Error in synthesizeWithGemini:", error);
-        return new Response("Error generating speech", { status: 500 });
-   }
-}
+//         return wavBuffer;
+//    } catch (error) {
+//         console.error("Error in synthesizeWithGemini:", error);
+//         return new Response("Error generating speech", { status: 500 });
+//    }
+// }
 
 export async function textToSpeech(text: string){
     try {
