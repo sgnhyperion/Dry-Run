@@ -3,6 +3,8 @@
 > Single source of truth for **where we are**. Each phase has its own doc in `docs/phase-N.md`.
 > Master design/architecture lives in `/DRY_RUN.md`.
 > Tool/model choices (with rationale + eval stats) live in `docs/decisions.md` (ADR-style decision log).
+> *(Rebuilt 2026-09-04 after the original was lost to the `/docs/*` gitignore rule — aggregates intact,
+> per-sentence eval rows regenerable via `scripts/eval-tts.mjs`. `docs/` is now tracked.)*
 >
 > **Convention:** starting a phase → create `docs/phase-N.md`; finishing a phase → update that doc into a
 > completed record and flip its status here.
@@ -50,6 +52,19 @@ feed the brain, closing the full voice loop. See `docs/decisions.md` entry 3 + `
 deferred (TTS is NOT the bottleneck — synth is sub-second; perceived lag is the LLM + no-overlap pipeline). NOTE: `/interview`
 UI was built by a *separate* AI agent — Harsh owns the logic, not the UI. Harsh writes the code (mentor/co-pilot). PM = **pnpm**.
 See [phase-1.md](phase-1.md) for gotchas (`reactStrictMode: false`, three pinned `0.180.0`, RPM→VRM).
+
+**⛔ BLOCKED (2026-09-03) — the brain is down.** `POST /api/interview` → **HTTP 403 `permission_denied`**
+("Your project has been denied access"). curl bisect proved it is **provider-side, not code**: `GET /v1beta/models`
+returns **200** (key valid, env loads, `gemini-3.6-flash` present) while **every** model 403s at inference, and
+`gemini-2.5-flash` is 404 "no longer available to new users" — boxed in from both sides. Leading hypothesis: the key
+was minted under the **Workspace-managed** `@scalerailabs.com` account, where org policy blocks generative APIs.
+**Next action: mint a key from a personal Gmail and re-run the curl.** Full evidence table → `decisions.md` entry 4.
+
+**⏸️ Ollama brain switch — deferred to Phase 2 (decided 2026-09-04).** Ollama is installed and ready
+(`qwen2.5:14b` on M5 Pro / 24 GB) as a $0 offline fallback, but making the brain switchable **requires** dropping
+Gemini's server-side `previous_interaction_id` for a caller-owned transcript (`askBrain(messages) → {text}`) — which
+*is* Phase 2's memory foundation. Building it twice is wasted work, so the provider switch lands as a side effect of
+memory. Design of record + Ollama API gotchas → `decisions.md` entry 5.
 
 ## Key locked decisions (see `/DRY_RUN.md` for full rationale)
 - Product: **Dry Run** — affective, self-improving AI technical interviewer (voice + 3D avatar).
