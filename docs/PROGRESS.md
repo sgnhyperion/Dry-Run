@@ -9,13 +9,14 @@
 > **Convention:** starting a phase → create `docs/phase-N.md`; finishing a phase → update that doc into a
 > completed record and flip its status here.
 
-## ⚠️ IMPORTANT — Working mode (as of 2026-08-06): MENTOR, not intern
-**Harsh writes all the code from here on. Claude's role is to GUIDE, not build.**
-- Do **not** write/scaffold implementation code for him, and don't make the edits yourself.
-- Instead: explain concepts, give the mental model + approach, point to the right APIs/files/papers,
-  review his code, debug alongside him, and unblock — like a senior mentor pairing with an engineer.
-- Exceptions only if Harsh explicitly asks Claude to write a specific piece.
-- Rationale: maximize his hands-on learning in AI/ML/agents (the whole point of the project).
+## ⚠️ IMPORTANT — Working mode (as of 2026-09-10): BUILD MODE — Claude implements, Harsh reviews
+**Claude writes the code. Harsh reviews and directs.**
+- Ship working code; explain it at review time rather than before.
+- Fewer clarifying questions — make the routine call, state the assumption, keep moving.
+- Cut teaching prose. Harsh reads the diff, not a lecture.
+- Docs + decision-log upkeep remain Claude's.
+- Rationale: Phases 2–5 hold the resume value; build speed is now the bottleneck, not learning rate.
+- *(Supersedes MENTOR mode, 2026-08-06 → 2026-09-10, under which Harsh wrote all implementation code.)*
 
 ## Status legend
 🔵 in progress · ✅ done · ⚪ not started · ⏸️ paused
@@ -25,46 +26,46 @@
 | Phase | Status | Doc | One-line summary |
 |------:|:------:|-----|------------------|
 | 0 — Make it run | ✅ | [phase-0.md](phase-0.md) | Gut legacy MimiChat stack → clean, building Next.js skeleton on Mac |
-| 1 — Talking spine | 🔵 | [phase-1.md](phase-1.md) | GLB avatar + lip-sync + STT→Claude→TTS (voice→avatar loop) |
+| 1 — Talking spine | ✅ | [phase-1.md](phase-1.md) | VRM avatar + lip-sync + STT→LLM→TTS — **full voice loop closed** |
 | 2 — Memory | ⚪ | — | Generative Agents memory (observation→retrieval→reflection→planning) over pgvector |
 | 3 — Coding substrate + judge | ⚪ | — | Code editor + run tests + **trained judge/reward model** + debrief |
 | 4 — Affect (SER) | ⚪ | — | **Trained speech-emotion model** → composure meter → reward signal |
 | 5 — Self-improvement + evals | ⚪ | — | Reflexion loop + eval harness + A/B research result (graphs) |
-| 6 — Polish + deploy | ⚪ | — | Full-duplex/barge-in polish · Dockerize · deploy (GCP/AWS free tier) · write-up |
+| 6 — Polish + deploy | 🔵 | — | ✅ **streaming + pipelining + barge-in done early** (see #7) · Dockerize · deploy · write-up |
 
 ## Current focus
-**Phase 1, Milestone 1.3 — the brain. ✅ COMPLETE (2026-08-13).** Full text interviewer working: `POST /api/interview`
-→ LLM behind an `askBrain()` seam → interviewer persona (`system_instruction`) → multi-turn memory (Gemini
-`previous_interaction_id`) → a browser chat UI + **full-transcript history** at `/interview` (browser holds the `id`).
-(1.1 ✅ VRM avatar · 1.2 ✅ mic lip-sync at `/studio`.) On the **Gemini free tier** for now (no Anthropic credits);
-Claude swaps in via the seam later. **▶ Milestone 1.4 (voice out / TTS) — IN PROGRESS.** ✅ Stage A (browser
-`SpeechSynthesis`) done. ✅ Gemini TTS wired behind a `textToSpeech()` seam (`/api/tts`) + a robust eval harness
-(`scripts/eval-tts.mjs`, throttle + success-rate). **Gemini free-tier TTS ELIMINATED** (429, low RPM + slow RTF 1.5–4.3).
-**✅ Kokoro-82M ADOPTED (2026-08-17)** — self-hosted Python FastAPI server (`tts-server/server.py`: `KPipeline` loaded
-once at boot, `af_heart` voice, chunks stitched via `np.concatenate`, in-memory WAV), swapped behind the same
-`textToSpeech()` seam (one-file change). Benchmark: **RTF 0.08–0.12, sub-second synth, 27/27 calls, $0** (vs Gemini RTF
-1.5–4.3 + 429s); MOS ~3.5. Fixed the `window is not defined` SSR crash (AudioContext created lazily in `handleSend`).
-✅ **Avatar bridge DONE (2026-08-17) — talking spine closed:** shared audio bus (`src/lib/lipsync.ts`), avatar mounted on
-`/interview` (`dynamic`, `ssr:false`), TTS spliced through an inline `AnalyserNode` (`source → analyser → destination`)
-driving the 1.2 `aa` viseme → avatar lip-syncs the interviewer's voice. Full loop: type → Gemini brain → Kokoro TTS →
-sound + synced mouth. **▶ NEXT — Milestone 1.5 (voice IN / STT):** candidate *speaks* → transcribe (local Whisper) →
-feed the brain, closing the full voice loop. See `docs/decisions.md` entry 3 + `phase-1.md`. Streaming + brain-latency
-deferred (TTS is NOT the bottleneck — synth is sub-second; perceived lag is the LLM + no-overlap pipeline). NOTE: `/interview`
-UI was built by a *separate* AI agent — Harsh owns the logic, not the UI. Harsh writes the code (mentor/co-pilot). PM = **pnpm**.
-See [phase-1.md](phase-1.md) for gotchas (`reactStrictMode: false`, three pinned `0.180.0`, RPM→VRM).
+**▶ PIVOT (2026-09-14) — streaming voice + multi-agent orchestration, pulled forward from Phase 6.**
+Triggered by ShortLoop (voice AI platform) reaching out about their founding team. Their stack is
+*real-time multi-agent orchestration, streaming voice, context engineering, latency* — so **#6 had deferred
+exactly the wrong thing.** Streaming/barge-in went to Phase 6 as "lowest resume value"; for this target it's
+the whole product. Pulled forward. Full reasoning + measurements → `decisions.md` **#7**.
 
-**⛔ BLOCKED (2026-09-03) — the brain is down.** `POST /api/interview` → **HTTP 403 `permission_denied`**
-("Your project has been denied access"). curl bisect proved it is **provider-side, not code**: `GET /v1beta/models`
-returns **200** (key valid, env loads, `gemini-3.6-flash` present) while **every** model 403s at inference, and
-`gemini-2.5-flash` is 404 "no longer available to new users" — boxed in from both sides. Leading hypothesis: the key
-was minted under the **Workspace-managed** `@scalerailabs.com` account, where org policy blocks generative APIs.
-**Next action: mint a key from a personal Gmail and re-run the curl.** Full evidence table → `decisions.md` entry 4.
+**Shipped (branch `streaming-voice-pipeline`, 5 commits):**
+- **Pipelined turn** — tokens stream, a chunker cuts speakable sentences, TTS starts on each while the
+  model keeps writing. Audio emitted strictly in order. **Mean TTFA speedup 3.13×** (3.97× / 3.76× / 1.67×),
+  total turn time did not regress. A/B'd through identical code via a `mode` flag (`scripts/bench-latency.mjs`).
+- **Stateless provider-agnostic brain** — dropped Gemini's `previous_interaction_id` for a caller-owned
+  transcript; three adapters (openai · gemini · ollama) behind one streaming seam. **This is #5's deferred
+  refactor, now done** — and it's the precondition for Phase 2 memory *and* their "context engineering".
+- **Multi-agent** — interviewer on the critical path, analyst off it; the analyst's verdict compiles into a
+  directive that steers the next turn. Split by **latency class**, not by topic.
+- **Barge-in** — stops scheduled-but-unstarted audio and aborts the server mid-generation.
+- **Live latency panel** — per-stage budget in the UI, because "it feels faster" isn't an engineering claim.
 
-**⏸️ Ollama brain switch — deferred to Phase 2 (decided 2026-09-04).** Ollama is installed and ready
-(`qwen2.5:14b` on M5 Pro / 24 GB) as a $0 offline fallback, but making the brain switchable **requires** dropping
-Gemini's server-side `previous_interaction_id` for a caller-owned transcript (`askBrain(messages) → {text}`) — which
-*is* Phase 2's memory foundation. Building it twice is wasted work, so the provider switch lands as a side effect of
-memory. Design of record + Ollama API gotchas → `decisions.md` entry 5.
+**🔑 The finding worth keeping:** *"not awaited" is not the same as "free."* Running the analyst concurrently
+on shared local compute pushed TTFA 1463 → 4307 ms; "fixing" it with a smaller model triggered an Ollama
+evict-and-reload that stalled one turn **56 seconds**. Scheduling is now deployment-aware — concurrent on
+hosted infra, deferred on a single local instance.
+
+**⚠️ Two things NOT verified:**
+1. **OpenAI is wired but never ran** — the key in the environment is rejected (`sk-svcac…`, service-account).
+   Every number above is Ollama. **Needs a working key in `.env.local`.**
+2. **The client has never run in a browser.** It typechecks and builds and the server pipeline is verified
+   end to end by curl, but the Chrome extension was unavailable to drive a real page. **Click through
+   `/interview` before demoing.**
+
+**Owed:** human-speech WER eval for STT (#6). **Still ahead:** Phase 2 memory — now unblocked, since the
+stateless transcript refactor it depended on is done.
 
 ## Key locked decisions (see `/DRY_RUN.md` for full rationale)
 - Product: **Dry Run** — affective, self-improving AI technical interviewer (voice + 3D avatar).
@@ -72,4 +73,4 @@ memory. Design of record + Ollama API gotchas → `decisions.md` entry 5.
 - Stack: Next.js + three.js/**VRM** (`@pixiv/three-vrm`; RPM shut down 2026-01-31) + **Claude** (Opus 4.8 / Sonnet 4.6) + **Supabase** (Postgres+pgvector) +
   **Pipecat/LiveKit** (real-time voice) + Python FastAPI (SER + judge + embeddings) + Piston (code exec).
 - Non-goal: NOT a general assistant / Jarvis (kills measurability). Cross-device assistant = separate future project.
-- Working mode: **MENTOR, not intern** — Harsh writes the code, Claude guides only (see the IMPORTANT block at top).
+- Working mode: **BUILD MODE** — Claude implements, Harsh reviews (see the IMPORTANT block at top; superseded MENTOR mode on 2026-09-10).
