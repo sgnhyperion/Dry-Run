@@ -1,4 +1,5 @@
 import { streamBrain, activeProvider, type ChatMessage } from "@/lib/brain";
+import { analyzeAnswer, buildDirective } from "@/lib/agents";
 import { SentenceChunker } from "@/lib/sentences";
 import { textToSpeech } from "@/lib/voice";
 
@@ -28,8 +29,10 @@ export const dynamic = "force-dynamic";
  * the client renders these as a live latency budget.
  */
 export async function POST(request: Request) {
-  const { messages, mode = "pipelined" } = (await request.json()) as {
+  const { messages, mode = "pipelined", directive } = (await request.json()) as {
     messages: ChatMessage[];
+    /** Coaching note produced by the analyst DURING the previous turn. See lib/agents.ts. */
+    directive?: string | null;
     /**
      * "sequential" reproduces the OLD blocking pipeline — full reply, then one TTS call — so the
      * two strategies can be A/B'd through identical code, models, and hardware. It exists purely
@@ -109,8 +112,53 @@ export async function POST(request: Request) {
       try {
         send({ type: "start", provider: activeProvider(), at: 0 });
 
+        // ── The analyst: off the critical path, but HOW depends on the deployment ─────
+        // It scores the answer the user just gave and steers the NEXT turn, so nothing in this
+        // turn waits on its verdict. The open question is whether to run it *concurrently* with
+        // the interviewer or *after* the audio is out — and that's an infrastructure question,
+        // not a design preference:
+        //
+        //   hosted (OpenAI/Gemini) — separate inference infra, so concurrency is genuinely free.
+        //   single local Ollama    — one process, one model slot. Concurrency measurably HURT:
+        //                            same model → CPU contention pushed TTFA 1463ms → 4307ms;
+        //                            different model → an evict-and-reload stalled a turn 56s.
+        //                            Deferring until the audio is sent costs nothing audible.
+        //
+        // "Not awaited" is not the same as "free" when everything shares one machine.
+        const runAnalyst = () =>
+          analyzeAnswer(messages)
+            .then((analysis) => {
+              if (abort.signal.aborted) return;
+              timings.analystMs = since();
+              send({
+                type: "analysis",
+                at: since(),
+                analysis,
+                directive: buildDirective(analysis),
+              });
+            })
+            .catch(() => {
+              /* best-effort by design — never let the analyst break the conversation */
+            });
+
+        const deferAnalyst =
+          (process.env.ANALYST_MODE || (activeProvider() === "ollama" ? "deferred" : "concurrent")) ===
+          "deferred";
+        const analystJob = deferAnalyst ? null : runAnalyst();
+
+        // Context engineering: the directive from the PREVIOUS turn's analyst rides in as a
+        // system-adjacent note on the latest user message, so the interviewer adapts without
+        // the candidate ever seeing the scoring machinery.
+        const contexted: ChatMessage[] = directive
+          ? messages.map((m, i) =>
+              i === messages.length - 1 && m.role === "user"
+                ? { ...m, content: `${m.content}\n\n${directive}` }
+                : m,
+            )
+          : messages;
+
         // ── Producer: stream the brain, cutting sentences as they complete ─────────────
-        for await (const delta of streamBrain(messages, abort.signal)) {
+        for await (const delta of streamBrain(contexted, { signal: abort.signal })) {
           if (abort.signal.aborted) break;
 
           if (timings.llmFirstTokenMs === undefined) {
@@ -143,7 +191,14 @@ export async function POST(request: Request) {
         wake();
         await drain;
 
+        // The voice path is DONE here. Stamp it before joining the analyst — otherwise the
+        // off-critical-path agent would inflate the very metric that exists to prove it isn't on
+        // the critical path.
         timings.totalMs = since();
+
+        // Either join the concurrent analyst, or start the deferred one now that the audio is
+        // fully sent. Both paths keep it off the critical path; only the contention differs.
+        await (analystJob ?? runAnalyst());
         send({ type: "done", reply: fullReply, timings, mode, aborted: abort.signal.aborted });
       } catch (error) {
         console.error("turn failed:", error);
