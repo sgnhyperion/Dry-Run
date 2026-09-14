@@ -56,9 +56,10 @@ export async function analyzeAnswer(messages: ChatMessage[]): Promise<Analysis |
       system: ANALYST_PROMPT,
       temperature: 0.1,
       maxTokens: 120,
-      // Small model on purpose — see BrainOptions.tier. Scoring one answer into four short
-      // fields does not need the big model, and using it measurably slowed the voice path.
-      tier: "fast",
+      // Background tier — see BrainOptions.tier. Nobody hears this agent, so it can afford a
+      // slower, smarter model; on a single local instance it shares the interactive model
+      // instead, because swapping costs more than it saves.
+      tier: "background",
     });
     return parseAnalysis(raw);
   } catch (error) {

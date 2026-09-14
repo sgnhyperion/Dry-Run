@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 
 /**
  * The brain: streaming, stateless, provider-agnostic.
@@ -17,7 +18,7 @@ import OpenAI from "openai";
 export type Role = "system" | "user" | "assistant";
 export type ChatMessage = { role: Role; content: string };
 
-export type BrainProvider = "openai" | "gemini" | "ollama";
+export type BrainProvider = "openai" | "gemini" | "ollama" | "anthropic";
 
 export function activeProvider(): BrainProvider {
   return (process.env.BRAIN_PROVIDER as BrainProvider) || "openai";
@@ -52,19 +53,34 @@ export type BrainOptions = {
   /**
    * MODEL TIERING by latency class.
    *
-   * "main" — the voice path. Quality matters; the user hears every word.
-   * "fast" — background agents. A smaller model is not just cheaper, it's *less disruptive*:
+   * "interactive" — the voice path. The user hears every word, so time-to-first-token is the
+   *                 binding constraint and a *smaller, non-reasoning* model usually wins.
+   * "background"  — agents nobody is waiting to hear. Latency is free here, so this tier can
+   *                 afford a SLOWER, SMARTER model.
    *
-   * Measured on this machine — running the analyst concurrently on the SAME 14B model pushed
-   * time-to-first-audio from 1463ms to 4307ms. Logically the analyst is off the critical path,
-   * but on shared local compute it still steals CPU from the TTS and the interviewer. "Not
-   * awaited" is not the same as "free". Tiering is what makes the concurrency actually pay.
+   * Named by ROLE, not by speed, because which model is right flips by provider:
+   *   anthropic → interactive = Haiku (fast, no thinking), background = Sonnet (better judgement)
+   *   ollama    → both the SAME model, because a single local instance holds one at a time and
+   *               swapping cost a measured 56-second stall (see below)
+   *
+   * Why tiering exists at all: running the analyst concurrently on the same 14B model pushed
+   * time-to-first-audio from 1463ms to 4307ms. Logically it's off the critical path, but on
+   * shared compute it still steals CPU. "Not awaited" is not the same as "free".
    */
-  tier?: "main" | "fast";
+  tier?: "interactive" | "background";
 };
 
 /** Per-provider model for a latency tier. */
-function modelFor(provider: BrainProvider, tier: "main" | "fast"): string {
+function modelFor(provider: BrainProvider, tier: "interactive" | "background"): string {
+  if (provider === "anthropic") {
+    // Haiku 4.5 on the voice path specifically because it predates the 4.6 family and so does
+    // NOT reason by default — the opposite of the problem Gemini gave us, where thinking could
+    // be bounded but never disabled. Sonnet 5 for the analyst: slower, but it's off the path,
+    // and stricter JSON adherence is worth real money there.
+    return tier === "background"
+      ? process.env.ANTHROPIC_BACKGROUND_MODEL || "claude-sonnet-5"
+      : process.env.ANTHROPIC_MODEL || "claude-haiku-4-5";
+  }
   if (provider === "ollama") {
     const main = process.env.OLLAMA_MODEL || "qwen2.5:14b";
     // Default the fast tier to the SAME model. Counter-intuitive, but measured: Ollama holds one
@@ -72,15 +88,15 @@ function modelFor(provider: BrainProvider, tier: "main" | "fast"): string {
     // analyst model forces an evict-and-reload every turn — which produced a 56-SECOND stall
     // mid-conversation. A swap costs far more than the contention tiering was meant to avoid.
     // Set OLLAMA_FAST_MODEL explicitly only if the daemon can hold both models resident.
-    return tier === "fast" ? process.env.OLLAMA_FAST_MODEL || main : main;
+    return tier === "background" ? process.env.OLLAMA_BACKGROUND_MODEL || main : main;
   }
   if (provider === "gemini") {
-    return tier === "fast"
-      ? process.env.GEMINI_FAST_MODEL || "gemini-3.6-flash"
+    return tier === "background"
+      ? process.env.GEMINI_BACKGROUND_MODEL || "gemini-3.6-flash"
       : process.env.GEMINI_MODEL || "gemini-3.6-flash";
   }
-  return tier === "fast"
-    ? process.env.OPENAI_FAST_MODEL || "gpt-4o-mini"
+  return tier === "background"
+    ? process.env.OPENAI_BACKGROUND_MODEL || "gpt-4o-mini"
     : process.env.OPENAI_MODEL || "gpt-4o-mini";
 }
 
@@ -95,13 +111,15 @@ export async function* streamBrain(
     signal: opts.signal,
     maxTokens: opts.maxTokens ?? 160,
     temperature: opts.temperature ?? 0.7,
-    model: modelFor(provider, opts.tier ?? "main"),
+    model: modelFor(provider, opts.tier ?? "interactive"),
   };
   const gen =
     provider === "gemini"
       ? streamGemini(messages, o)
       : provider === "ollama"
       ? streamOllama(messages, o)
+      : provider === "anthropic"
+      ? streamAnthropic(messages, o)
       : streamOpenAI(messages, o);
   for await (const delta of gen) yield delta;
 }
@@ -231,6 +249,39 @@ async function* streamOllama(
       // .message.content — nested, and it's `content`, not `text`.
       const delta = JSON.parse(line)?.message?.content;
       if (delta) yield delta;
+    }
+  }
+}
+
+/**
+ * Anthropic. ⚠️ WRITTEN BUT NEVER EXECUTED — no API key available at time of writing.
+ * Typechecks against the SDK; verify against a real key before relying on it.
+ */
+async function* streamAnthropic(
+  messages: ChatMessage[],
+  o: ResolvedOptions,
+): AsyncGenerator<string> {
+  const client = new Anthropic();
+
+  const stream = await client.messages.create(
+    {
+      model: o.model,
+      max_tokens: o.maxTokens,
+      temperature: o.temperature,
+      // Anthropic takes the system prompt as a TOP-LEVEL field, not a message with role
+      // "system" — so filter it out of the array rather than passing it through.
+      system: o.system,
+      messages: messages
+        .filter((m) => m.role !== "system")
+        .map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+      stream: true,
+    },
+    { signal: o.signal },
+  );
+
+  for await (const event of stream) {
+    if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+      yield event.delta.text;
     }
   }
 }
