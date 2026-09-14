@@ -4,10 +4,12 @@
 > its purpose, rationale, architecture, decisions, and roadmap. Keep it updated as we build.
 > Last major update: 2026-08-04.
 >
-> **⚠️ IMPORTANT — Working mode (2026-08-06): MENTOR, not intern.** Harsh writes all implementation code
-> from here on. Claude guides only — explain concepts, give the approach/mental model, point to APIs/papers,
-> review and debug his code, unblock. Claude does **not** write or edit implementation code unless Harsh
-> explicitly asks for a specific piece. (Docs/memory upkeep by Claude is fine.)
+> **⚠️ IMPORTANT — Working mode (updated 2026-09-10): BUILD MODE — Claude implements, Harsh reviews.**
+> Claude writes the implementation code; Harsh reviews and directs. Optimize for throughput: fewer questions,
+> less teaching prose, ship working code and explain it in the review. Docs/decision-log upkeep stays with Claude.
+> *(Supersedes the 2026-08-06 MENTOR mode, where Harsh wrote all code to maximize hands-on learning. Changed
+> deliberately: Phases 2–5 carry the resume weight, and the bottleneck became build speed, not learning rate.
+> The learning now happens at review time.)*
 
 ---
 
@@ -280,8 +282,17 @@ Audio ML (SER) · reward modeling / RLHF-adjacent (judge) · RL / bandits (best-
 - **Deploy:** build **cloud-agnostic (Docker + Next.js)**; run on Mac first; pick GCP/AWS free tier later.
 - **DB / auth / vector store:** **Supabase** — Postgres + Auth + **pgvector (HNSW)** + storage in one; SQL
   fits the session/score/eval data and the memory retrieval. (Rewrite the small Firebase auth flow.)
-- **Real-time voice:** **adopt a voice-agent framework now (Pipecat or LiveKit)** — streaming STT→LLM→TTS
-  with VAD and barge-in from the start (not push-to-talk). The framework integrates the STT/TTS providers.
+- **Real-time voice:** ⚠️ **CORRECTED TWICE — read both.** The line originally read "adopt a voice-agent
+  framework now (Pipecat or LiveKit) … with VAD and barge-in from the start (**not** push-to-talk)", which
+  **contradicted §3.3, §3.4, §9 Phase 1 and §9 Phase 6** — all of which specify push-to-talk in v1.
+  - **2026-09-10** — resolved for the majority: push-to-talk shipped, framework deferred to Phase 6, on the
+    grounds that it was the lowest resume value in the roadmap. (`docs/decisions.md` #6)
+  - **2026-09-14** — *that judgement was target-specific and it flipped.* With a voice-AI company in play,
+    streaming and latency became the highest-value work, so **streaming, pipelined turns and barge-in were
+    built early — by hand, not by adopting Pipecat/LiveKit.** Measured **3.13× faster time-to-first-audio**
+    than the blocking pipeline. Building it directly is also the better artefact: the orchestration, chunking,
+    and latency budget are ours rather than a framework's. **Pipecat/LiveKit remain unadopted and optional.**
+    (`docs/decisions.md` #7)
 - **Retrieval stack:** hybrid **BM25 (inverted index) + pgvector/HNSW → RRF → cross-encoder rerank →
   recency×importance** (Generative Agents). See §5A.
 - **Embeddings:** local **sentence-transformers** on the Python service → pgvector (Anthropic has no
@@ -291,8 +302,9 @@ Audio ML (SER) · reward modeling / RLHF-adjacent (judge) · RL / bandits (best-
 ### Pending (decide as we reach them)
 - **TTS provider:** **Google Cloud TTS** (best Hindi/English, ~1M chars/mo free) vs **Kokoro** (Apache-2.0,
   no account, self-hosted). Pick by which the voice framework integrates cleanly; behind an interface either way.
-- **STT provider:** whichever Pipecat/LiveKit integrates for *streaming* (Deepgram/AssemblyAI free tier, or
-  self-hosted faster-whisper). Browser Web Speech is out — barge-in needs streaming.
+- ~~**STT provider**~~ → **DECIDED: self-hosted `faster-whisper` (`small.en`, int8 CPU)** on the existing
+  local FastAPI service. See `docs/decisions.md` #6. *(Web Speech stays ruled out; hosted streaming providers
+  get revisited only if Phase 6 barge-in happens.)*
 - **LLM tiering:** Opus 4.8 for reflection/planning/judging; Sonnet 4.6 / Haiku 4.5 for latency-sensitive
   interactive turns + cheap memory-importance scoring (validate against the latency budget).
 - **Deployment host:** GCP e2-micro / Cloud Run vs. AWS free tier — decide once it runs locally.
@@ -416,7 +428,7 @@ real-time systems (voice), evaluation, and a measured research result. Deployed 
 
 ## 11. Open questions / to-decide log
 - [ ] TTS provider (Google Cloud TTS vs Kokoro).
-- [ ] STT provider (Web Speech vs Whisper vs hosted).
+- [x] STT provider → **self-hosted `faster-whisper` `small.en`** (decisions.md #6, 2026-09-10).
 - [ ] DB/vector: stay Firebase vs consolidate on Supabase+pgvector.
 - [ ] Embeddings provider for memory.
 - [ ] Deployment host (GCP vs AWS).
