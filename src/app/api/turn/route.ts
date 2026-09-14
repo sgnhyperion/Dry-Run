@@ -28,7 +28,15 @@ export const dynamic = "force-dynamic";
  * the client renders these as a live latency budget.
  */
 export async function POST(request: Request) {
-  const { messages } = (await request.json()) as { messages: ChatMessage[] };
+  const { messages, mode = "pipelined" } = (await request.json()) as {
+    messages: ChatMessage[];
+    /**
+     * "sequential" reproduces the OLD blocking pipeline — full reply, then one TTS call — so the
+     * two strategies can be A/B'd through identical code, models, and hardware. It exists purely
+     * so the latency claim is measured rather than asserted (scripts/bench-latency.mjs).
+     */
+    mode?: "pipelined" | "sequential";
+  };
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return Response.json({ error: "messages[] required" }, { status: 400 });
@@ -113,21 +121,30 @@ export async function POST(request: Request) {
           fullReply += delta;
           send({ type: "token", text: delta });
 
-          for (const sentence of chunker.push(delta)) {
-            synthesize(sentence, sentenceIndex++);
+          // Sequential mode deliberately does NOT cut sentences here — it waits for everything.
+          if (mode === "pipelined") {
+            for (const sentence of chunker.push(delta)) {
+              synthesize(sentence, sentenceIndex++);
+            }
           }
         }
 
-        const tail = chunker.flush();
-        if (tail && !abort.signal.aborted) synthesize(tail, sentenceIndex++);
         timings.llmDoneMs = since();
+
+        if (mode === "pipelined") {
+          const tail = chunker.flush();
+          if (tail && !abort.signal.aborted) synthesize(tail, sentenceIndex++);
+        } else if (fullReply.trim() && !abort.signal.aborted) {
+          // The old way: one synthesis of the whole reply, started only once the model is done.
+          synthesize(fullReply.trim(), sentenceIndex++);
+        }
 
         producerDone = true;
         wake();
         await drain;
 
         timings.totalMs = since();
-        send({ type: "done", reply: fullReply, timings, aborted: abort.signal.aborted });
+        send({ type: "done", reply: fullReply, timings, mode, aborted: abort.signal.aborted });
       } catch (error) {
         console.error("turn failed:", error);
         send({
