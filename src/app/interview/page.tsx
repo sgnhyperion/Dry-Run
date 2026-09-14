@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { useRecorder } from "@/lib/useRecorder";
 import { AudioQueue } from "@/lib/audioQueue";
-import { runTurn, type TurnTimings } from "@/lib/turnClient";
+import { runTurn, type TurnTimings, type Analysis } from "@/lib/turnClient";
 
 const AvatarViewer = dynamic(() => import("@/components/AvatarViewer"), { ssr: false });
 
@@ -22,6 +22,8 @@ export default function InterviewPage() {
   const [thinking, setThinking] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const directiveRef = useRef<string | null>(null);
 
   const { recording, start: startRec, stop: stopRec } = useRecorder();
   const ctxRef = useRef<AudioContext | null>(null);
@@ -93,9 +95,16 @@ export default function InterviewPage() {
               setMessages((prev) => [...prev, { role: "assistant", content: reply.trim() }]);
             }
           },
+          onAnalysis: (a, directive) => {
+            setAnalysis(a);
+            // Carried into the NEXT turn — the interviewer adapts to a judgement made while
+            // the previous answer was still being spoken.
+            directiveRef.current = directive;
+          },
           onError: (m) => setError(m),
         },
         controller.signal,
+        directiveRef.current,
       );
     } catch (err) {
       // An abort is a barge-in, not a failure — don't surface it as an error.
@@ -266,7 +275,7 @@ export default function InterviewPage() {
 
         {/* ── latency panel ───────────────────────────────────────────── */}
         <aside className="hidden min-h-0 flex-col lg:flex">
-          <LatencyPanel timings={timings} provider={provider || "—"} />
+          <LatencyPanel timings={timings} provider={provider || "—"} analysis={analysis} />
         </aside>
       </div>
     </main>
@@ -303,7 +312,15 @@ function Bubble({ role, text, live }: { role: "assistant" | "user"; text: string
  * "first audio" and "LLM finished" is the win — whenever first audio lands EARLIER, the user was
  * already hearing the answer while the model was still writing it.
  */
-function LatencyPanel({ timings, provider }: { timings: TurnTimings | null; provider: string }) {
+function LatencyPanel({
+  timings,
+  provider,
+  analysis,
+}: {
+  timings: TurnTimings | null;
+  provider: string;
+  analysis: Analysis | null;
+}) {
   const rows: { label: string; value?: number; hint: string }[] = [
     { label: "STT", value: timings?.sttMs, hint: "speech → text" },
     { label: "LLM first token", value: timings?.llmFirstTokenMs, hint: "TTFT" },
@@ -358,6 +375,23 @@ function LatencyPanel({ timings, provider }: { timings: TurnTimings | null; prov
           </p>
           <p className="mt-1 text-[11px] leading-snug text-zinc-400">
             Sequentially, the user would have waited for the full reply plus all synthesis.
+          </p>
+        </div>
+      )}
+
+      {analysis && (
+        <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+          <div className="flex items-baseline justify-between">
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-400">Analyst</p>
+            <span className="font-mono text-lg font-semibold tabular-nums text-white">
+              {analysis.score}
+              <span className="text-xs font-normal text-zinc-500">/10</span>
+            </span>
+          </div>
+          <p className="mt-1.5 text-[11px] text-emerald-300">+ {analysis.strength}</p>
+          <p className="text-[11px] text-amber-300">− {analysis.gap}</p>
+          <p className="mt-2 font-mono text-[10px] text-zinc-500">
+            next turn → {analysis.nextMove.replace("_", " ")}
           </p>
         </div>
       )}

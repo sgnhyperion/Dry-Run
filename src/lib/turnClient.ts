@@ -12,6 +12,13 @@ export type TurnTimings = {
   perceivedMs?: number;
 };
 
+export type Analysis = {
+  score: number;
+  strength: string;
+  gap: string;
+  nextMove: "go_deeper" | "ease_off" | "change_topic";
+};
+
 export type TurnEvent =
   | { type: "start"; provider: string }
   | { type: "token"; text: string }
@@ -19,6 +26,7 @@ export type TurnEvent =
   | { type: "audio"; index: number; wav: string; at: number }
   | { type: "timing"; key: string; ms: number }
   | { type: "done"; reply: string; timings: TurnTimings; aborted: boolean }
+  | { type: "analysis"; at: number; analysis: Analysis | null; directive: string | null }
   | { type: "error"; message: string };
 
 export type TurnHandlers = {
@@ -27,6 +35,7 @@ export type TurnHandlers = {
   onSentence?: (index: number, text: string) => void;
   onAudio?: (index: number, wavBase64: string) => void | Promise<void>;
   onTiming?: (key: string, ms: number) => void;
+  onAnalysis?: (analysis: Analysis | null, directive: string | null) => void;
   onDone?: (reply: string, timings: TurnTimings) => void;
   onError?: (message: string) => void;
 };
@@ -44,11 +53,13 @@ export async function runTurn(
   messages: { role: "user" | "assistant"; content: string }[],
   handlers: TurnHandlers,
   signal?: AbortSignal,
+  /** Coaching note from the PREVIOUS turn's analyst — this is the feedback loop closing. */
+  directive?: string | null,
 ): Promise<void> {
   const res = await fetch("/api/turn", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, directive }),
     signal,
   });
 
@@ -92,6 +103,9 @@ export async function runTurn(
           break;
         case "timing":
           handlers.onTiming?.(event.key, event.ms);
+          break;
+        case "analysis":
+          handlers.onAnalysis?.(event.analysis, event.directive);
           break;
         case "done":
           handlers.onDone?.(event.reply, event.timings);
