@@ -23,6 +23,8 @@ from kokoro import KPipeline
 from pydantic import BaseModel
 from fastapi.responses import Response
 
+import memory as memory_store
+
 app = FastAPI(title="Dry Run ML service")
 
 # ── TTS: Kokoro-82M ──────────────────────────────────────────────────────────
@@ -37,14 +39,90 @@ WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small.en")
 whisper = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
 
 
+# Retrieval models load on first use rather than at import. Unlike TTS and STT, memory
+# is not on the audio hot path, and loading two more transformers at boot pushes startup
+# past a minute — which matters because a cold start is the one thing that ruins a demo.
+memory_store.init_db()
+
+
 class TTSRequest(BaseModel):
     text: str
+
+
+class MemoryAdd(BaseModel):
+    user_id: str
+    text: str
+    importance: int = 5
+    kind: str = "observation"
+    session_id: str | None = None
+
+
+class MemorySearch(BaseModel):
+    user_id: str
+    query: str
+    k: int = 5
+    use_rerank: bool = True
+    use_hybrid: bool = True
+    touch: bool = True
 
 
 @app.get("/health")
 def health():
     """Cheap liveness probe — lets the Next.js side tell 'server down' from 'model broke'."""
-    return {"ok": True, "tts": "kokoro-82M", "stt": WHISPER_MODEL}
+    return {"ok": True, "tts": "kokoro-82M", "stt": WHISPER_MODEL, "memory": True}
+
+
+@app.post("/memory/add")
+def memory_add(req: MemoryAdd):
+    memory_id = memory_store.add(
+        user_id=req.user_id,
+        text=req.text,
+        importance=req.importance,
+        kind=req.kind,
+        session_id=req.session_id,
+    )
+    return {"id": memory_id}
+
+
+@app.post("/memory/search")
+def memory_search(req: MemorySearch):
+    started = time.perf_counter()
+    results = memory_store.search(
+        user_id=req.user_id,
+        query=req.query,
+        k=req.k,
+        use_rerank=req.use_rerank,
+        use_hybrid=req.use_hybrid,
+        touch=req.touch,
+    )
+    return {
+        "results": results,
+        "corpus_size": len(memory_store.all_for_user(req.user_id)),
+        "took_ms": round((time.perf_counter() - started) * 1000),
+    }
+
+
+@app.post("/memory/warmup")
+def memory_warmup():
+    """Force the embedding + reranker models to load.
+
+    Calling /memory/search with an unknown user does NOT do this: search short-circuits on
+    an empty corpus before touching a model, so warmup silently warmed nothing and the first
+    real retrieval paid a measured 10.8s cold load mid-conversation.
+    """
+    started = time.perf_counter()
+    from retrieval.rerank import rerank
+    from retrieval.vectors import embed
+
+    embed(["warm"])
+    rerank("warm", [("x", "warm")], 1)
+    return {"ok": True, "ms": round((time.perf_counter() - started) * 1000)}
+
+
+@app.get("/memory/all")
+def memory_all(user_id: str):
+    """Inspection endpoint — useful for demos and for eyeballing what the agent believes."""
+    return {"memories": [vars(m) for m in memory_store.all_for_user(user_id)]}
 
 
 @app.post("/tts")

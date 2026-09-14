@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { AudioQueue } from "@/lib/audioQueue";
 import { useVoiceLoop } from "@/lib/useVoiceLoop";
-import { runTurn, type TurnTimings, type Analysis } from "@/lib/turnClient";
+import { runTurn, type TurnTimings, type Analysis, type RecalledMemory } from "@/lib/turnClient";
 
 const AvatarViewer = dynamic(() => import("@/components/AvatarViewer"), { ssr: false });
 
@@ -19,6 +19,7 @@ export default function InterviewPage() {
   const [timings, setTimings] = useState<TurnTimings | null>(null);
   const [provider, setProvider] = useState("");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [recalled, setRecalled] = useState<RecalledMemory[]>([]);
   const [speaking, setSpeaking] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
@@ -28,6 +29,9 @@ export default function InterviewPage() {
   const queueRef = useRef<AudioQueue | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const directiveRef = useRef<string | null>(null);
+  // Memory is scoped to this id. Stored in localStorage so "it remembers you" actually
+  // survives a reload — which is the entire point of the feature and the whole demo.
+  const userIdRef = useRef<string>("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // The VAD loop runs outside React's render cycle, so it can't read state — it reads these.
@@ -51,6 +55,12 @@ export default function InterviewPage() {
 
   // Warm the models on mount so a cold reload lands here, not on the first thing you say.
   useEffect(() => {
+    let id = localStorage.getItem("dryrun_user_id");
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem("dryrun_user_id", id);
+    }
+    userIdRef.current = id;
     fetch("/api/warmup", { method: "POST" }).catch(() => {});
   }, []);
 
@@ -106,6 +116,7 @@ export default function InterviewPage() {
             setAnalysis(a);
             directiveRef.current = directive;
           },
+          onMemory: (mems) => setRecalled(mems),
           onDone: (reply, serverTimings) => {
             Object.assign(t, serverTimings);
             setTimings({ ...t });
@@ -118,6 +129,7 @@ export default function InterviewPage() {
         },
         controller.signal,
         directiveRef.current,
+        userIdRef.current,
       );
     } catch (err) {
       if ((err as Error)?.name !== "AbortError") {
@@ -303,7 +315,7 @@ export default function InterviewPage() {
         </div>
 
         <aside className="hidden min-h-0 flex-col lg:flex">
-          <LatencyPanel timings={timings} provider={provider || "—"} analysis={analysis} />
+          <LatencyPanel timings={timings} provider={provider || "—"} analysis={analysis} recalled={recalled} />
         </aside>
       </div>
     </main>
@@ -338,13 +350,16 @@ function LatencyPanel({
   timings,
   provider,
   analysis,
+  recalled,
 }: {
   timings: TurnTimings | null;
   provider: string;
   analysis: Analysis | null;
+  recalled: RecalledMemory[];
 }) {
   const rows = [
     { label: "STT", value: timings?.sttMs, hint: "speech → text" },
+    { label: "Memory recall", value: timings?.memoryMs, hint: "hybrid + rerank" },
     { label: "LLM first token", value: timings?.llmFirstTokenMs, hint: "TTFT" },
     { label: "First sentence", value: timings?.firstSentenceMs, hint: "chunker cut" },
     { label: "First audio", value: timings?.firstAudioMs, hint: "TTFA (server)" },
@@ -391,6 +406,21 @@ function LatencyPanel({
             Audio started <span className="font-mono font-semibold text-emerald-300">{overlap}ms</span> before
             the model finished writing.
           </p>
+        </div>
+      )}
+
+      {recalled.length > 0 && (
+        <div className="mt-4 rounded-xl border border-cyan-400/20 bg-cyan-500/10 p-3">
+          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-cyan-300">
+            Recalled ({recalled.length})
+          </p>
+          <ul className="mt-1.5 space-y-1.5">
+            {recalled.map((m, i) => (
+              <li key={i} className="text-[11px] leading-snug text-zinc-300">
+                <span className="font-mono text-cyan-400/70">{m.score.toFixed(2)}</span> {m.text}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

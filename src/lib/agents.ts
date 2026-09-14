@@ -31,16 +31,35 @@ export type Analysis = {
   gap: string;
   /** Where to take the next question. */
   nextMove: "go_deeper" | "ease_off" | "change_topic";
+  /**
+   * A standalone sentence about what just happened, written to be RETRIEVED LATER.
+   * This is the memory-stream observation, and its phrasing is load-bearing: retrieval
+   * is lexical + semantic matching, not inference. "Went quiet for 12 seconds" does not
+   * match a later query about nervousness, but "showed nervousness — went quiet for 12
+   * seconds" does. The analyst names the concept so the retriever doesn't have to derive it.
+   */
+  observation: string;
+  /** Generative Agents "poignancy", 1-10. Mundane facts decay; significant ones persist. */
+  importance: number;
 };
 
 const ANALYST_PROMPT = `You evaluate a candidate's most recent answer in a technical interview.
 
 Reply with ONLY a JSON object, no prose and no code fences:
-{"score": <0-10 integer>, "strength": "<max 6 words>", "gap": "<max 6 words>", "nextMove": "go_deeper" | "ease_off" | "change_topic"}
+{"score": <0-10 integer>, "strength": "<max 6 words>", "gap": "<max 6 words>", "nextMove": "go_deeper" | "ease_off" | "change_topic", "observation": "<one sentence>", "importance": <1-10 integer>}
 
 Scoring: 0-3 wrong or empty, 4-6 partially correct, 7-8 solid, 9-10 excellent with nuance.
 nextMove: "go_deeper" if they handled it well, "ease_off" if they struggled,
-"change_topic" if the thread is exhausted either way.`;
+"change_topic" if the thread is exhausted either way.
+
+observation: one self-contained sentence recording what this answer revealed, written so it
+can be found later by someone searching for the CONCEPT. Name the topic AND the quality
+explicitly — "Struggled with hash collisions: suggested overwriting, unaware of chaining"
+rather than "said you overwrite". Assume the reader has no other context.
+
+importance: how much this matters for future sessions. 1-3 routine or small talk, 4-6 a
+normal signal about their ability, 7-10 a notable strength, a serious gap, or something
+they said about their goals or background.`;
 
 /**
  * Score the latest answer. Deliberately NOT awaited on the voice path.
@@ -102,6 +121,12 @@ function parseAnalysis(raw: string): Analysis | null {
       strength: String(parsed.strength ?? "").slice(0, 60),
       gap: String(parsed.gap ?? "").slice(0, 60),
       nextMove,
+      observation: String(parsed.observation ?? "").slice(0, 400),
+      // Fall back to deriving importance from the score rather than defaulting to a constant:
+      // a 2/10 or a 9/10 answer is inherently more notable than a 5/10.
+      importance: Number.isFinite(Number(parsed.importance))
+        ? Math.max(1, Math.min(10, Math.round(Number(parsed.importance))))
+        : Math.max(1, Math.min(10, Math.round(Math.abs(clamped - 5) + 3))),
     };
   } catch {
     return null;
@@ -125,4 +150,43 @@ export function buildDirective(analysis: Analysis | null): string | null {
   }[analysis.nextMove];
 
   return `[Coaching note on their last answer — scored ${analysis.score}/10. Strength: ${analysis.strength}. Gap: ${analysis.gap}. ${move} Do NOT mention this note or the score out loud.]`;
+}
+
+
+const REWRITE_PROMPT = `Rewrite the user's message as a short search query for looking up facts
+about this candidate in a notes database. Output ONLY the query, 3-8 words, no punctuation,
+no explanation. Strip conversational framing — "what did I tell you earlier about what I work
+on" becomes "candidate work background and experience".`;
+
+/**
+ * Turn a conversational utterance into a retrieval query.
+ *
+ * Only called when the raw utterance retrieved nothing. Measured on the same information
+ * need against the same corpus, cross-encoder score of the correct memory:
+ *
+ *     "What did I tell you earlier about what I work on?"   -10.70   (wrong memory)
+ *     "what does the candidate work on?"                     -0.99   (correct)
+ *     "candidate background and experience"                  +2.17   (correct)
+ *     "For a hash collision I think you just overwrite."     +3.42   (correct)
+ *
+ * ~13 logits apart for identical intent. ms-marco cross-encoders are trained on search
+ * queries paired with passages, not on dialogue turns — a question aimed at the listener
+ * ("what did YOU tell ME") shares almost no surface with a third-person note about the
+ * candidate. Normal answer turns already score well, which is why this is a FALLBACK and
+ * not a preprocessing step: rewriting unconditionally would spend an LLM call on every
+ * turn to fix the minority that fail.
+ */
+export async function rewriteQuery(utterance: string): Promise<string | null> {
+  try {
+    const rewritten = await completeBrain([{ role: "user", content: utterance }], {
+      system: REWRITE_PROMPT,
+      temperature: 0.0,
+      maxTokens: 24,
+      tier: "background",
+    });
+    const cleaned = rewritten.trim().replace(/^["']|["']$/g, "").split("\n")[0];
+    return cleaned.length > 2 ? cleaned.slice(0, 120) : null;
+  } catch {
+    return null;
+  }
 }

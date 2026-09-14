@@ -1,5 +1,6 @@
 import { completeBrain } from "@/lib/brain";
 import { textToSpeech } from "@/lib/voice";
+import { warmMemory } from "@/lib/memory";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,16 @@ export async function POST() {
     result.ttsMs = Math.round(performance.now() - t);
   } catch (error) {
     result.ttsError = error instanceof Error ? error.message : "tts warmup failed";
+  }
+
+  // The retrieval models load lazily on first search — measured at 9.6s cold vs ~15ms warm.
+  // Retrieval sits on the critical path, so that load has to happen here, not on turn one.
+  try {
+    const t = performance.now();
+    await warmMemory();
+    result.memoryMs = Math.round(performance.now() - t);
+  } catch (error) {
+    result.memoryError = error instanceof Error ? error.message : "memory warmup failed";
   }
 
   result.totalMs = Math.round(performance.now() - started);

@@ -1,5 +1,6 @@
 import { streamBrain, activeProvider, type ChatMessage } from "@/lib/brain";
-import { analyzeAnswer, buildDirective } from "@/lib/agents";
+import { analyzeAnswer, buildDirective, rewriteQuery } from "@/lib/agents";
+import { recall, remember, buildMemoryContext } from "@/lib/memory";
 import { SentenceChunker } from "@/lib/sentences";
 import { textToSpeech } from "@/lib/voice";
 
@@ -29,10 +30,12 @@ export const dynamic = "force-dynamic";
  * the client renders these as a live latency budget.
  */
 export async function POST(request: Request) {
-  const { messages, mode = "pipelined", directive } = (await request.json()) as {
+  const { messages, mode = "pipelined", directive, userId } = (await request.json()) as {
     messages: ChatMessage[];
     /** Coaching note produced by the analyst DURING the previous turn. See lib/agents.ts. */
     directive?: string | null;
+    /** Stable per-browser id. Memory is scoped to it, so "remembers you" survives reloads. */
+    userId?: string;
     /**
      * "sequential" reproduces the OLD blocking pipeline — full reply, then one TTS call — so the
      * two strategies can be A/B'd through identical code, models, and hardware. It exists purely
@@ -127,7 +130,7 @@ export async function POST(request: Request) {
         // "Not awaited" is not the same as "free" when everything shares one machine.
         const runAnalyst = () =>
           analyzeAnswer(messages)
-            .then((analysis) => {
+            .then(async (analysis) => {
               if (abort.signal.aborted) return;
               timings.analystMs = since();
               send({
@@ -136,6 +139,18 @@ export async function POST(request: Request) {
                 analysis,
                 directive: buildDirective(analysis),
               });
+
+              // Write the observation to the memory stream. This is what makes the corpus
+              // self-generating: no ingest job, no dataset — the agent's memory is the
+              // byproduct of being used. Off the critical path by construction, since the
+              // analyst already is.
+              if (userId && analysis?.observation) {
+                try {
+                  await remember(userId, analysis.observation, analysis.importance);
+                } catch (error) {
+                  console.error("remember failed:", error);
+                }
+              }
             })
             .catch(() => {
               /* best-effort by design — never let the analyst break the conversation */
@@ -146,13 +161,63 @@ export async function POST(request: Request) {
           "deferred";
         const analystJob = deferAnalyst ? null : runAnalyst();
 
-        // Context engineering: the directive from the PREVIOUS turn's analyst rides in as a
-        // system-adjacent note on the latest user message, so the interviewer adapts without
-        // the candidate ever seeing the scoring machinery.
-        const contexted: ChatMessage[] = directive
+        // ── Memory retrieval — the one thing that MUST precede the brain ──────────────
+        // Everything else in this route was moved off the critical path; retrieval can't be,
+        // because the interviewer's context depends on it. So it gets measured instead:
+        // warm searches run 13-28ms against a memory stream, which is noise next to a
+        // multi-second turn, but the number is emitted so a regression is visible rather
+        // than quietly eating the latency budget the rest of this file exists to protect.
+        const lastUser = [...messages].reverse().find((m) => m.role === "user");
+        let memoryContext: string | null = null;
+
+        if (userId && lastUser) {
+          try {
+            const t = performance.now();
+
+            // Optimistic fast path: most turns are ANSWERS, which retrieve well as-is
+            // (+3.42 measured) and cost ~15ms. Only conversational/meta questions fail.
+            let { results, corpusSize } = await recall(userId, lastUser.content, 4);
+            let usedQuery = lastUser.content;
+
+            // Fallback: nothing cleared the relevance floor, so pay for a rewrite. This
+            // spends an LLM call ONLY on the turns that would otherwise recall nothing —
+            // the common case never sees the latency.
+            // corpusSize > 0 matters: an empty result on an EMPTY corpus is not a retrieval
+            // failure, it's a new user. Rewriting there burns an LLM call to search nothing —
+            // which is exactly what happened on the first two turns of a fresh session.
+            if (results.length === 0 && corpusSize > 0) {
+              const rewritten = await rewriteQuery(lastUser.content);
+              if (rewritten) {
+                usedQuery = rewritten;
+                ({ results } = await recall(userId, rewritten, 4));
+              }
+            }
+
+            timings.memoryMs = Math.round(performance.now() - t);
+            memoryContext = buildMemoryContext(results);
+            send({
+              type: "memory",
+              at: since(),
+              ms: timings.memoryMs,
+              query: usedQuery,
+              rewritten: usedQuery !== lastUser.content,
+              recalled: results.map((m) => ({ text: m.text, score: m.score })),
+            });
+          } catch (error) {
+            // Memory is an enhancement, never a dependency. A dead ML service should
+            // degrade the interviewer to amnesia, not break the conversation.
+            console.error("recall failed:", error);
+          }
+        }
+
+        // Context engineering: retrieved memory and the previous turn's coaching note both
+        // ride in as system-adjacent notes on the latest user message, so the interviewer
+        // adapts without the candidate ever seeing the machinery.
+        const notes = [memoryContext, directive].filter(Boolean).join("\n\n");
+        const contexted: ChatMessage[] = notes
           ? messages.map((m, i) =>
               i === messages.length - 1 && m.role === "user"
-                ? { ...m, content: `${m.content}\n\n${directive}` }
+                ? { ...m, content: `${m.content}\n\n${notes}` }
                 : m,
             )
           : messages;

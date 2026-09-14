@@ -101,6 +101,19 @@ def init_db() -> None:
 def add(user_id: str, text: str, importance: int, kind: str = "observation",
         session_id: str | None = None) -> str:
     now = time.time()
+
+    # Dedupe on exact text. The analyst re-reads a window of the transcript each turn, so a
+    # turn that reveals nothing new (a meta-question, a clarification) makes it restate the
+    # PREVIOUS observation verbatim. Observed: "Struggled with hash collisions..." stored
+    # twice from consecutive turns. Duplicates are not harmless — they occupy multiple slots
+    # in a top-k retrieval and crowd out other memories with a single repeated fact.
+    with _connect() as conn:
+        existing = conn.execute(
+            "SELECT id FROM memories WHERE user_id = ? AND text = ?", (user_id, text)
+        ).fetchone()
+        if existing:
+            return existing["id"]
+
     memory_id = str(uuid.uuid4())
     with _connect() as conn:
         conn.execute(

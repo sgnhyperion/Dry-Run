@@ -10,7 +10,11 @@ export type TurnTimings = {
   sttMs?: number;
   /** Client-side: mic release → first audible word. The number the user actually feels. */
   perceivedMs?: number;
+  /** Memory retrieval — the only added stage that sits ON the critical path. */
+  memoryMs?: number;
 };
+
+export type RecalledMemory = { text: string; score: number };
 
 export type Analysis = {
   score: number;
@@ -27,6 +31,7 @@ export type TurnEvent =
   | { type: "timing"; key: string; ms: number }
   | { type: "done"; reply: string; timings: TurnTimings; aborted: boolean }
   | { type: "analysis"; at: number; analysis: Analysis | null; directive: string | null }
+  | { type: "memory"; at: number; ms: number; recalled: RecalledMemory[] }
   | { type: "error"; message: string };
 
 export type TurnHandlers = {
@@ -36,6 +41,7 @@ export type TurnHandlers = {
   onAudio?: (index: number, wavBase64: string) => void | Promise<void>;
   onTiming?: (key: string, ms: number) => void;
   onAnalysis?: (analysis: Analysis | null, directive: string | null) => void;
+  onMemory?: (recalled: RecalledMemory[], ms: number) => void;
   onDone?: (reply: string, timings: TurnTimings) => void;
   onError?: (message: string) => void;
 };
@@ -55,11 +61,13 @@ export async function runTurn(
   signal?: AbortSignal,
   /** Coaching note from the PREVIOUS turn's analyst — this is the feedback loop closing. */
   directive?: string | null,
+  /** Stable per-browser id; memory is scoped to it. */
+  userId?: string,
 ): Promise<void> {
   const res = await fetch("/api/turn", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, directive }),
+    body: JSON.stringify({ messages, directive, userId }),
     signal,
   });
 
@@ -106,6 +114,9 @@ export async function runTurn(
           break;
         case "analysis":
           handlers.onAnalysis?.(event.analysis, event.directive);
+          break;
+        case "memory":
+          handlers.onMemory?.(event.recalled, event.ms);
           break;
         case "done":
           handlers.onDone?.(event.reply, event.timings);
