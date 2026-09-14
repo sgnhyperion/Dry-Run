@@ -64,6 +64,17 @@ hosted infra, deferred on a single local instance.
    end to end by curl, but the Chrome extension was unavailable to drive a real page. **Click through
    `/interview` before demoing.**
 
+**Provider decision (2026-09-14): stay on Ollama + Kokoro, buy nothing.** Priced the alternative —
+Anthropic at ~$0.0014/turn (Haiku 4.5 interactive + Sonnet 5 background) is ~3,600 turns for $5 — but the
+local stack is $0, quota-free, and measurably fast enough. The **Gemini free tier is disqualified**: the
+429 body gives the hard number, **5 requests/minute**, and this architecture makes 2 calls per turn, so it
+caps at ~2.5 turns/min. An Anthropic adapter is written and typechecks but has **never executed** (no key).
+
+**Demo stability work.** The one real risk of going local was the cold-model stall (36.5 s measured from
+cold; 56 s when a swap was involved). `/api/warmup` now fires on page mount so that cost lands during page
+load, and `keep_alive` holds the model for 30 min. Verified warm across 6 consecutive turns:
+first-audio **1031–2189 ms**, no stalls.
+
 **Owed:** human-speech WER eval for STT (#6). **Still ahead:** Phase 2 memory — now unblocked, since the
 stateless transcript refactor it depended on is done.
 

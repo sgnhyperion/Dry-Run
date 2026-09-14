@@ -111,7 +111,19 @@ Then open:
 API routes: `POST /api/interview` (the brain) · `POST /api/tts` (voice out) · `POST /api/stt` (voice in).
 
 **Using the mic:** click it once to start recording, once again to stop — it transcribes and sends
-automatically. Push-to-talk is deliberate; streaming and barge-in are Phase 6 (`docs/decisions.md` #6).
+automatically. Click the mic (or **Interrupt**) while it's talking to barge in.
+
+### Before a live demo
+
+1. **Start both processes** and open `/interview` **at least a minute early.** The page fires
+   `/api/warmup` on mount, which preloads the model — from cold that takes ~35 s, and you want it
+   spent on page load rather than on your first question.
+2. **Check the model is resident:** `curl -s localhost:11434/api/ps` should list `qwen2.5:14b`.
+   `keep_alive` holds it for 30 min; if you idle longer than that, reload the page to re-warm.
+3. **Don't run `pnpm build` or start a second model** — either can evict it and cost you a 30-60 s
+   stall mid-demo.
+
+Warm, 6 consecutive turns measured 1031–2189 ms to first audio.
 
 ---
 
