@@ -37,6 +37,15 @@ export default function InterviewPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streaming]);
 
+  // Warm the models on mount. A locally-served model that's been evicted pays a full reload on
+  // its next request (measured: 11.8s, and 56s when a swap was involved) — doing it here means
+  // that cost lands while the page is still loading instead of on the first thing the user says.
+  useEffect(() => {
+    fetch("/api/warmup", { method: "POST" }).catch(() => {
+      /* best-effort — a cold first turn is slow, not broken */
+    });
+  }, []);
+
   // AudioContext must be created inside a user gesture (autoplay policy) and never on the server.
   const audio = () => {
     if (!ctxRef.current) {
