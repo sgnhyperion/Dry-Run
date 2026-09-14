@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
-import { useRecorder } from "@/lib/useRecorder";
 import { AudioQueue } from "@/lib/audioQueue";
+import { useVoiceLoop } from "@/lib/useVoiceLoop";
 import { runTurn, type TurnTimings, type Analysis } from "@/lib/turnClient";
 
 const AvatarViewer = dynamic(() => import("@/components/AvatarViewer"), { ssr: false });
@@ -17,63 +17,70 @@ export default function InterviewPage() {
   const [streaming, setStreaming] = useState("");
   const [message, setMessage] = useState("");
   const [timings, setTimings] = useState<TurnTimings | null>(null);
-  const [provider, setProvider] = useState<string>("");
+  const [provider, setProvider] = useState("");
+  const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [speaking, setSpeaking] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  const directiveRef = useRef<string | null>(null);
 
-  const { recording, start: startRec, stop: stopRec } = useRecorder();
   const ctxRef = useRef<AudioContext | null>(null);
   const queueRef = useRef<AudioQueue | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const directiveRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const busy = thinking || transcribing;
+  // The VAD loop runs outside React's render cycle, so it can't read state — it reads these.
+  const speakingRef = useRef(false);
+  const thinkingRef = useRef(false);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
+  const setSpeakingBoth = (v: boolean) => {
+    speakingRef.current = v;
+    setSpeaking(v);
+  };
+  const setThinkingBoth = (v: boolean) => {
+    thinkingRef.current = v;
+    setThinking(v);
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streaming]);
 
-  // Warm the models on mount. A locally-served model that's been evicted pays a full reload on
-  // its next request (measured: 11.8s, and 56s when a swap was involved) — doing it here means
-  // that cost lands while the page is still loading instead of on the first thing the user says.
+  // Warm the models on mount so a cold reload lands here, not on the first thing you say.
   useEffect(() => {
-    fetch("/api/warmup", { method: "POST" }).catch(() => {
-      /* best-effort — a cold first turn is slow, not broken */
-    });
+    fetch("/api/warmup", { method: "POST" }).catch(() => {});
   }, []);
 
-  // AudioContext must be created inside a user gesture (autoplay policy) and never on the server.
   const audio = () => {
     if (!ctxRef.current) {
       ctxRef.current = new AudioContext();
-      queueRef.current = new AudioQueue(ctxRef.current, () => setSpeaking(false));
+      queueRef.current = new AudioQueue(ctxRef.current, () => setSpeakingBoth(false));
     }
     return queueRef.current!;
   };
 
-  /** Barge-in: kill scheduled audio AND tell the server to stop generating. */
-  const interrupt = () => {
+  /** Stop the agent mid-sentence: kill queued audio and abort the server stream. */
+  const interrupt = useCallback(() => {
     queueRef.current?.stop();
     abortRef.current?.abort();
     abortRef.current = null;
-    setSpeaking(false);
-    setThinking(false);
-  };
+    setSpeakingBoth(false);
+    setThinkingBoth(false);
+  }, []);
 
-  const takeTurn = async (userText: string, micReleasedAt?: number, sttMs?: number) => {
+  const takeTurn = useCallback(async (userText: string, spokeAt?: number, sttMs?: number) => {
     const queue = audio();
-    const history: Msg[] = [...messages, { role: "user", content: userText }];
+    const history: Msg[] = [...messagesRef.current, { role: "user", content: userText }];
 
     setMessages(history);
     setStreaming("");
-    setThinking(true);
+    setThinkingBoth(true);
     setError(null);
 
-    const turnTimings: TurnTimings = { sttMs };
+    const t: TurnTimings = { sttMs };
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -82,33 +89,30 @@ export default function InterviewPage() {
         history,
         {
           onStart: (p) => setProvider(p),
-          onToken: (t) => setStreaming((prev) => prev + t),
+          onToken: (tok) => setStreaming((prev) => prev + tok),
           onTiming: (key, ms) => {
-            Object.assign(turnTimings, { [key]: ms });
-            setTimings({ ...turnTimings });
+            Object.assign(t, { [key]: ms });
+            setTimings({ ...t });
           },
           onAudio: async (_i, wav) => {
-            // The moment that matters: first audible word after the user stopped talking.
-            if (turnTimings.perceivedMs === undefined && micReleasedAt !== undefined) {
-              turnTimings.perceivedMs = Math.round(performance.now() - micReleasedAt);
+            if (t.perceivedMs === undefined && spokeAt !== undefined) {
+              t.perceivedMs = Math.round(performance.now() - spokeAt);
             }
-            setSpeaking(true);
-            setThinking(false);
+            setSpeakingBoth(true);
+            setThinkingBoth(false);
             await queue.enqueue(wav);
           },
+          onAnalysis: (a, directive) => {
+            setAnalysis(a);
+            directiveRef.current = directive;
+          },
           onDone: (reply, serverTimings) => {
-            Object.assign(turnTimings, serverTimings);
-            setTimings({ ...turnTimings });
+            Object.assign(t, serverTimings);
+            setTimings({ ...t });
             setStreaming("");
             if (reply.trim()) {
               setMessages((prev) => [...prev, { role: "assistant", content: reply.trim() }]);
             }
-          },
-          onAnalysis: (a, directive) => {
-            setAnalysis(a);
-            // Carried into the NEXT turn — the interviewer adapts to a judgement made while
-            // the previous answer was still being spoken.
-            directiveRef.current = directive;
           },
           onError: (m) => setError(m),
         },
@@ -116,77 +120,84 @@ export default function InterviewPage() {
         directiveRef.current,
       );
     } catch (err) {
-      // An abort is a barge-in, not a failure — don't surface it as an error.
       if ((err as Error)?.name !== "AbortError") {
         setError(err instanceof Error ? err.message : "Turn failed");
       }
     } finally {
-      setThinking(false);
+      setThinkingBoth(false);
       abortRef.current = null;
     }
-  };
+  }, []);
 
-  const handleMic = async () => {
-    if (!recording) {
-      // Starting to talk while the agent is talking IS the interruption.
-      if (speaking || thinking) interrupt();
-      audio(); // unlock the AudioContext inside this gesture
-      setError(null);
+  // ── the hands-free loop ────────────────────────────────────────────────────
+  const voice = useVoiceLoop({
+    // Fires the instant speech is detected, before the utterance finishes. This IS barge-in:
+    // if the agent is mid-sentence when you start talking, it stops immediately rather than
+    // talking over you for another two seconds.
+    onSpeechStart: () => {
+      if (speakingRef.current || thinkingRef.current) interrupt();
+    },
+    onUtterance: async (wav) => {
+      const spokeAt = performance.now();
+      setTranscribing(true);
+      let transcript = "";
+      let sttMs: number | undefined;
       try {
-        await startRec();
-      } catch {
-        setError("Microphone permission denied.");
+        const t0 = performance.now();
+        const res = await fetch("/api/stt", {
+          method: "POST",
+          headers: { "Content-Type": "audio/wav" },
+          body: wav,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? `Transcription failed (${res.status})`);
+        sttMs = Math.round(performance.now() - t0);
+        transcript = (data.text ?? "").trim();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Transcription failed.");
+      } finally {
+        setTranscribing(false);
       }
+      // Whisper emits filler like "Thank you." for noise; ignore anything too trivial to be a turn.
+      if (transcript.length > 1) await takeTurn(transcript, spokeAt, sttMs);
+    },
+    isAgentSpeaking: () => speakingRef.current,
+  });
+
+  const toggleConversation = async () => {
+    if (voice.active) {
+      voice.stop();
+      interrupt();
       return;
     }
-
-    const releasedAt = performance.now();
-    setTranscribing(true);
-    let transcript = "";
-    let sttMs: number | undefined;
-
-    try {
-      const blob = await stopRec();
-      if (!blob) throw new Error("No audio captured — hold the mic a little longer.");
-
-      const t = performance.now();
-      const res = await fetch("/api/stt", {
-        method: "POST",
-        headers: { "Content-Type": blob.type },
-        body: blob,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `Transcription failed (${res.status})`);
-      sttMs = Math.round(performance.now() - t);
-
-      transcript = (data.text ?? "").trim();
-      if (!transcript) throw new Error("Didn't catch that — try again.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Transcription failed.");
-    } finally {
-      setTranscribing(false);
-    }
-
-    if (transcript) await takeTurn(transcript, releasedAt, sttMs);
+    // Both the AudioContext and getUserMedia need a user gesture — this click is it.
+    audio();
+    await ctxRef.current?.resume();
+    await voice.start(ctxRef.current!);
   };
 
   const handleSend = () => {
     const text = message.trim();
-    if (!text || busy) return;
+    if (!text || thinking || transcribing) return;
     if (speaking) interrupt();
     setMessage("");
     void takeTurn(text);
   };
 
-  const status = recording
-    ? { label: "Listening", dot: "animate-pulse bg-rose-400" }
-    : transcribing
-    ? { label: "Transcribing", dot: "animate-pulse bg-sky-400" }
-    : speaking
-    ? { label: "Speaking", dot: "bg-violet-400" }
-    : thinking
-    ? { label: "Thinking", dot: "animate-pulse bg-amber-400" }
-    : { label: "Ready", dot: "bg-emerald-400" };
+  const status =
+    voice.state === "speaking"
+      ? { label: "You're talking", dot: "animate-pulse bg-rose-400" }
+      : transcribing
+      ? { label: "Transcribing", dot: "animate-pulse bg-sky-400" }
+      : speaking
+      ? { label: "Speaking", dot: "bg-violet-400" }
+      : thinking
+      ? { label: "Thinking", dot: "animate-pulse bg-amber-400" }
+      : voice.state === "calibrating"
+      ? { label: "Calibrating", dot: "animate-pulse bg-zinc-400" }
+      : voice.active
+      ? { label: "Listening", dot: "bg-emerald-400" }
+      : { label: "Mic off", dot: "bg-zinc-600" };
 
   return (
     <main className="relative flex h-screen flex-col overflow-hidden bg-[#0B0E14] text-zinc-100">
@@ -196,13 +207,12 @@ export default function InterviewPage() {
       </div>
 
       <div className="relative mx-auto grid h-full w-full max-w-6xl grid-cols-1 gap-5 px-5 py-6 lg:grid-cols-[1fr_20rem]">
-        {/* ── main column ─────────────────────────────────────────────── */}
         <div className="flex min-h-0 flex-col">
           <header className="mb-4 flex shrink-0 items-center justify-between">
             <div>
               <h1 className="text-xl font-semibold tracking-tight">Dry Run</h1>
               <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.25em] text-zinc-500">
-                Streaming Voice Interviewer
+                Full-duplex voice interviewer
               </p>
             </div>
             <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/30 px-3 py-1.5">
@@ -215,13 +225,37 @@ export default function InterviewPage() {
 
           <div className="relative mb-4 h-52 shrink-0 overflow-hidden rounded-3xl border border-white/10 ring-1 ring-white/5">
             <AvatarViewer showMic={false} />
-            {(speaking || thinking) && (
-              <button
-                onClick={interrupt}
-                className="absolute bottom-3 right-3 z-10 rounded-full border border-white/20 bg-black/50 px-3 py-1.5 text-xs text-zinc-200 backdrop-blur-md transition hover:bg-black/70"
-              >
-                Interrupt
-              </button>
+
+            {!voice.active && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
+                <button
+                  onClick={toggleConversation}
+                  className="rounded-full bg-gradient-to-r from-violet-500 to-cyan-500 px-6 py-3 text-sm font-medium text-white shadow-lg transition hover:brightness-110"
+                >
+                  Start conversation
+                </button>
+              </div>
+            )}
+
+            {voice.active && (
+              <div className="absolute bottom-3 left-3 right-3 z-10 flex items-center gap-3">
+                {/* Live input meter — fastest way to tell "it can't hear me" from "it's thinking". */}
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className={
+                      "h-full rounded-full transition-[width] duration-75 " +
+                      (voice.state === "speaking" ? "bg-rose-400" : "bg-emerald-400/70")
+                    }
+                    style={{ width: `${Math.min(100, voice.level * 600)}%` }}
+                  />
+                </div>
+                <button
+                  onClick={toggleConversation}
+                  className="rounded-full border border-white/20 bg-black/50 px-3 py-1 text-[11px] text-zinc-200 backdrop-blur-md transition hover:bg-black/70"
+                >
+                  Stop mic
+                </button>
+              </div>
             )}
           </div>
 
@@ -245,44 +279,29 @@ export default function InterviewPage() {
                     handleSend();
                   }
                 }}
-                disabled={recording || transcribing}
-                placeholder={recording ? "Listening… click again to send" : "Type, or hit the mic to speak…"}
-                className="w-full resize-none rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 pr-36 text-zinc-100 placeholder:text-zinc-600 focus:border-violet-400/50 focus:outline-none disabled:opacity-60"
+                placeholder={voice.active ? "Just talk — or type here" : "Type, or start the conversation above"}
+                className="w-full resize-none rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 pr-24 text-zinc-100 placeholder:text-zinc-600 focus:border-violet-400/50 focus:outline-none"
               />
               <button
-                onClick={handleMic}
-                disabled={transcribing}
-                aria-label={recording ? "Stop and send" : "Speak"}
-                className={
-                  "absolute bottom-2.5 right-[5.5rem] flex h-9 w-9 items-center justify-center rounded-xl border transition disabled:opacity-40 " +
-                  (recording
-                    ? "animate-pulse border-rose-400/50 bg-rose-500/20 text-rose-300"
-                    : "border-white/10 bg-white/[0.06] text-zinc-300 hover:bg-white/[0.12]")
-                }
-              >
-                {recording ? (
-                  <span className="h-3 w-3 rounded-[3px] bg-rose-300" />
-                ) : (
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 0 1-14 0" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 18v3M8 21h8" />
-                  </svg>
-                )}
-              </button>
-              <button
                 onClick={handleSend}
-                disabled={!message.trim() || busy}
+                disabled={!message.trim() || thinking || transcribing}
                 className="absolute bottom-2.5 right-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-cyan-500 px-4 py-2 text-sm font-medium text-white transition hover:brightness-110 disabled:opacity-40"
               >
                 Send
               </button>
             </div>
-            {error && <p className="mt-2 text-xs text-rose-400">{error}</p>}
+            {error ? (
+              <p className="mt-2 text-xs text-rose-400">{error}</p>
+            ) : voice.error ? (
+              <p className="mt-2 text-xs text-rose-400">{voice.error}</p>
+            ) : (
+              <p className="mt-2 text-xs text-zinc-600">
+                Mic stays open — just start talking to interrupt. Headphones recommended.
+              </p>
+            )}
           </footer>
         </div>
 
-        {/* ── latency panel ───────────────────────────────────────────── */}
         <aside className="hidden min-h-0 flex-col lg:flex">
           <LatencyPanel timings={timings} provider={provider || "—"} analysis={analysis} />
         </aside>
@@ -315,12 +334,6 @@ function Bubble({ role, text, live }: { role: "assistant" | "user"; text: string
   );
 }
 
-/**
- * The latency budget, live. This is the point of the whole rebuild: "it feels fast" is not an
- * engineering claim, so every stage boundary is timestamped and shown. The gap between
- * "first audio" and "LLM finished" is the win — whenever first audio lands EARLIER, the user was
- * already hearing the answer while the model was still writing it.
- */
 function LatencyPanel({
   timings,
   provider,
@@ -330,7 +343,7 @@ function LatencyPanel({
   provider: string;
   analysis: Analysis | null;
 }) {
-  const rows: { label: string; value?: number; hint: string }[] = [
+  const rows = [
     { label: "STT", value: timings?.sttMs, hint: "speech → text" },
     { label: "LLM first token", value: timings?.llmFirstTokenMs, hint: "TTFT" },
     { label: "First sentence", value: timings?.firstSentenceMs, hint: "chunker cut" },
@@ -345,18 +358,16 @@ function LatencyPanel({
       : undefined;
 
   return (
-    <div className="flex h-full flex-col rounded-3xl border border-white/10 bg-white/[0.02] p-5">
+    <div className="flex h-full flex-col overflow-y-auto rounded-3xl border border-white/10 bg-white/[0.02] p-5">
       <h2 className="font-mono text-[10px] uppercase tracking-[0.25em] text-zinc-500">Latency budget</h2>
 
       <div className="mt-4 rounded-2xl border border-violet-400/20 bg-violet-500/10 p-4">
         <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-violet-300">Perceived</p>
         <p className="mt-1 text-3xl font-semibold tabular-nums text-white">
-          {timings?.perceivedMs !== undefined ? `${timings.perceivedMs}` : "—"}
+          {timings?.perceivedMs !== undefined ? timings.perceivedMs : "—"}
           <span className="ml-1 text-base font-normal text-zinc-400">ms</span>
         </p>
-        <p className="mt-1 text-[11px] leading-snug text-zinc-400">
-          mic release → first audible word
-        </p>
+        <p className="mt-1 text-[11px] leading-snug text-zinc-400">you stop talking → first word back</p>
       </div>
 
       <dl className="mt-4 space-y-2.5">
@@ -375,15 +386,10 @@ function LatencyPanel({
 
       {overlap !== undefined && overlap > 0 && (
         <div className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-500/10 p-3">
-          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-emerald-300">
-            Pipelining win
-          </p>
+          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-emerald-300">Pipelining win</p>
           <p className="mt-1 text-sm text-zinc-200">
             Audio started <span className="font-mono font-semibold text-emerald-300">{overlap}ms</span> before
             the model finished writing.
-          </p>
-          <p className="mt-1 text-[11px] leading-snug text-zinc-400">
-            Sequentially, the user would have waited for the full reply plus all synthesis.
           </p>
         </div>
       )}
