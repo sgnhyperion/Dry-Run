@@ -75,8 +75,19 @@ cold; 56 s when a swap was involved). `/api/warmup` now fires on page mount so t
 load, and `keep_alive` holds the model for 30 min. Verified warm across 6 consecutive turns:
 first-audio **1031–2189 ms**, no stalls.
 
-**Owed:** human-speech WER eval for STT (#6). **Still ahead:** Phase 2 memory — now unblocked, since the
-stateless transcript refactor it depended on is done.
+**▶ PHASE 2 IN PROGRESS — memory stream BUILT, unevaluated (2026-09-14).** The interviewer now writes
+observations and recalls them across sessions. Hybrid retrieval (custom BM25 + FAISS dense → RRF →
+cross-encoder rerank) scored by relevance + recency-decay + LLM-rated importance, wired into `/api/turn`
+(~15ms warm, on the critical path, measured). The corpus is **self-generating** — the analyst emits the
+observations. Full reasoning + the four bugs found → `decisions.md` **#8**.
+
+**▶ NEXT, in order:** (1) **reflection** — it fixes a *measured* retrieval failure, and it changes what's
+in the corpus, so evaluating before it means evaluating twice; (2) the **in-domain retrieval eval**, which
+replaces every guessed threshold with a measured one; (3) streaming STT (the last big latency win, and what
+would make "full-duplex" true).
+
+**Owed:** human-speech WER eval for STT (#6); retrieval eval (#8) — every threshold there is currently a
+guess set by reading score distributions across five memories.
 
 ## Key locked decisions (see `/DRY_RUN.md` for full rationale)
 - Product: **Dry Run** — affective, self-improving AI technical interviewer (voice + 3D avatar).
