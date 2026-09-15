@@ -416,6 +416,85 @@ Ollama defers it until the audio is out. Both keep it off the critical path; onl
 
 ---
 
+## #8 — Agent memory: Generative Agents stream + hybrid retrieval  ✅
+**Date:** 2026-09-14 · **Phase:** 2 · **Status:** ✅ built, ⚠️ unevaluated
+
+**Context.** Phase 2's memory layer, and the first component that makes the interviewer *stateful
+across sessions*. Built by porting the retrieval core from Harsh's separate **AI_Search_Engine**
+project (hand-written BM25, MiniLM embeddings, cross-encoder rerank) and adding the Generative
+Agents layer on top. The algorithms transfer unchanged — BM25 does not care whether a document is
+a news article or an observation about a candidate — but three things needed fixing and one needed
+building.
+
+**Rejected: evaluating on AG News.** The first plan was to reuse AI_Search_Engine's 120K-doc corpus
+for statistical power. Harsh pushed back and was right: retrieval quality on news does not transfer
+to retrieval quality on interview observations, and the cross-encoder failure found later
+(§ limitations) is *exactly* a domain-specific failure AG News could never have surfaced. Tuning
+thresholds on one corpus and deploying on another measures the wrong thing. AG News stays in its
+own repo; the eval here will be in-domain.
+
+### Ported, with fixes
+| Fix | Why |
+|---|---|
+| Weighted score fusion → **RRF** | The old fusion normalized BM25 by the *per-query maximum*, so the normalization constant moved every query and a fixed 0.7/0.3 weighting compared quantities whose scale shifted underneath it. RRF uses ranks, which are already comparable. |
+| `IndexFlatL2` + `1/(1+distance)` → **`IndexFlatIP`** | For L2-normalized vectors inner product *is* cosine; the distance→score transform was invented. |
+| Index type now chosen by corpus size | HNSW trades exactness for sublinear search — good at 100K vectors, bad at 500 where an exact scan is faster *and* correct. Threshold 20K. |
+| NLTK resource check | Caught `DownloadError`, but `nltk.data.find` raises `LookupError` — the `except` never fired. |
+
+### Built new: the three-factor score
+`score = 3.0·relevance + 1.0·recency + 1.0·importance`, each min-max normalized.
+Recency decays `0.995^hours` since last **access** (not creation), so retrieval refreshes a memory.
+
+**The corpus is self-generating** — the analyst (#7) already reads every answer, so it now also
+emits a one-sentence observation plus an importance rating. No ingest job, no dataset.
+
+### Four bugs found by testing — all the same shape: plausible code, confident nonsense
+1. **Min-max normalization amplifies noise into signal.** Memories written milliseconds apart
+   differed in raw recency by ~1e-7; normalized, that jitter spanned 0→1 and outvoted relevance.
+   Hit again on relevance: a query with no true match scored every candidate within 0.16 logits
+   (correctly "none of these match"), and normalization turned that flat noise into a confident
+   first place. Each factor now carries an **epsilon on its own scale**.
+2. **The paper's equal weights are wrong for this use.** Measured: for "what does he work on?" the
+   correct memory won relevance outright (cross-encoder −4.35 vs −9.77, and the only BM25 hit) and
+   still finished outside the top 3 — oldest and least important zeroed its other two factors, 1.0
+   against 2.2. Generative Agents asks "what should the agent have in mind"; Dry Run asks pointed
+   questions, where an irrelevant answer is worthless however recent. Hence relevance ×3.
+3. **Retrieval mutates its own corpus.** Touching `last_accessed_at` is rich-get-richer — winners
+   stay fresh, losers age and lose harder — and makes results irreproducible. Now optional;
+   **evaluation must pass `touch=False`.**
+4. **A relevance floor is required.** Returning the least-bad memory feeds the interviewer a
+   confident irrelevant "I remember you said X".
+
+### ⚠️ Known limitation — conversational queries break the cross-encoder
+Same information need, same corpus, score of the correct memory:
+
+| query form | score | correct? |
+|---|---|---|
+| "What did I tell you earlier about what I work on?" | **−10.70** | ❌ |
+| "what does the candidate work on?" | −0.99 | ✅ |
+| "candidate background and experience" | +2.17 | ✅ |
+| "For a hash collision I think you just overwrite." | +3.42 | ✅ |
+
+**13 logits apart for identical intent.** ms-marco pairs *search queries* with passages; a question
+aimed at the listener shares almost no surface with a third-person note. Since normal answer turns
+already score well, **query rewriting is a FALLBACK** that fires only when the raw utterance
+retrieved nothing *and* the corpus is non-empty — common case pays 0, failing case ~450ms.
+
+The cross-encoder also cannot connect *"went quiet for 12 seconds"* to a later query about
+nervousness (−11.36, indistinguishable from no-match). **That is the argument for reflection** —
+*"tends to get nervous on systems questions"* is the abstraction that makes it retrievable.
+
+### ⚠️ Owed — every threshold here is a guess
+`RELEVANCE_FLOOR = -9.0`, `W_RELEVANCE = 3.0`, and the three epsilons were set by reading score
+distributions across **five memories**. That is an anecdote, not evidence. The eval (in-domain:
+~300-500 synthetic memories, ~100 interviewer queries, LLM-proposed labels with a human-checked
+sample, ablating each stage) replaces them. **Not built.**
+
+**Also not built:** reflection, and storage is SQLite + FAISS rather than the planned
+Supabase/pgvector (behind a seam; needs an account).
+
+---
+
 ## Standing decisions inherited from `DRY_RUN.md` §6
 Locked at design time, not yet re-litigated — no independent eval evidence yet, so they are *not* numbered ADR
 entries. Each gets one when its phase produces measurements.
