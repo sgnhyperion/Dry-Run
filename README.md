@@ -20,7 +20,11 @@ mic ──► /api/stt ──► /api/turn ──► SSE ──► browser
                         │      └─ sentence chunker ──► TTS per sentence ──► audio, in order
                         │
                         └─ analyst      (off critical path)  scores the answer,
-                               compiles a directive that steers the NEXT turn
+                               compiles a directive that steers the NEXT turn,
+                               and writes one observation to the memory stream
+
+after the agent stops speaking ──► /api/reflect   (only when enough has accumulated)
+                                        └─ generalizes observations into insights
 ```
 
 The stages **overlap**: a sentence is synthesized the moment it's complete, while the model keeps
@@ -34,6 +38,32 @@ writing the next one. Time-to-first-audio stops scaling with reply length.
 
 `node scripts/bench-latency.mjs` reproduces this — it A/Bs both strategies through identical code via
 a `mode` flag, so the delta is attributable to the pipelining. Full reasoning in `docs/decisions.md` #7.
+
+---
+
+## What it remembers
+
+The interviewer writes an observation after every answer and retrieves against them on later turns
+(hybrid BM25 + dense → RRF → cross-encoder rerank, ranked by relevance + recency decay + importance).
+The corpus is **self-generating** — using the system is what fills it.
+
+Observations alone are episodic, though, and that has a measurable ceiling: *"went quiet for twelve
+seconds before answering"* scores **−11.36** against a later question about nervousness, i.e. no match
+at all. So the agent periodically **reflects** — asks itself what the salient questions about this
+candidate are, answers them from its own observations, and stores the answers as memories with pointers
+back to their evidence.
+
+| trait query | observations only | + reflections |
+|---|---|---|
+| "is the candidate nervous under pressure?" | ∅ −11.29 | ✅ **+8.69** |
+| "how does the candidate handle being unsure?" | ∅ −10.94 | ✅ −3.91 |
+| "is the candidate stronger at practical or theoretical work?" | ∅ −11.36 | ✅ **+4.63** |
+
+`node scripts/reflect-demo.mjs` reproduces this — two users get identical observations, one reflects,
+both are queried through the same retriever. Reasoning in `docs/decisions.md` #8 and #9.
+
+⚠️ Retrieval is **not yet evaluated**: the thresholds were set by reading score distributions across a
+handful of memories. The in-domain eval is the next thing owed.
 
 ---
 

@@ -490,8 +490,76 @@ distributions across **five memories**. That is an anecdote, not evidence. The e
 ~300-500 synthetic memories, ~100 interviewer queries, LLM-proposed labels with a human-checked
 sample, ablating each stage) replaces them. **Not built.**
 
-**Also not built:** reflection, and storage is SQLite + FAISS rather than the planned
-Supabase/pgvector (behind a seam; needs an account).
+**Also not built:** ~~reflection~~ (built 2026-09-15, **#9**), and storage is SQLite + FAISS rather
+than the planned Supabase/pgvector (behind a seam; needs an account).
+
+---
+
+## #9 — Reflection: the memory stream's abstraction layer  ✅
+**Date:** 2026-09-15 · **Phase:** 2 · **Status:** ✅ built and measured
+
+**Context.** #8 ended by naming its own hardest failure: the cross-encoder scored *"went quiet for
+twelve seconds before answering"* at **−11.36** against a query about nervousness — indistinguishable
+from no match at all. That is not a tuning problem. Observations are *episodic*; a query about a
+*trait* shares no surface with the episode that evidences it, and no reranker infers one from the
+other. The inference has to happen somewhere and be **written down as its own memory**. That is
+reflection (Park et al., 2023, §4.2), and it is the half of the memory stream #8 skipped.
+
+### The paper's three steps, kept
+1. **Trigger** — fire when importance accumulated *since the last reflection* crosses a threshold,
+   not on a turn counter. Reflection should follow how much has *happened*.
+2. **Questions** — ask the model what the salient questions about this person even are. The agent
+   decides what is worth generalizing; there is no hardcoded rubric.
+3. **Insights** — retrieve per question, synthesize, store as `kind = "reflection"` **with pointers
+   back to the evidence** (new `evidence` column). Reflections are ordinary memories: retrievable,
+   decaying, and eligible evidence for later reflections — the paper's tree.
+
+### Deviations, and why
+| Deviation | Reason |
+|---|---|
+| Window = *since last reflection*, not "the last 100 memories" | The paper's agents run for simulated days, so a fixed window slides past old material naturally. An interview is short enough that a fixed window would re-reflect on the *same* five observations and emit near-duplicate insights that then compete with the originals for top-k slots. |
+| Threshold **30**, not 150 | Scaled to ~1 observation/turn at importance 4–7 → roughly 5–7 substantive turns. Below that there is no pattern to generalize, only restatement. |
+| Questions processed **sequentially** | One local model slot. Concurrency there is the #7 contention failure one level up. Nothing waits on reflection, so serial costs nothing. |
+| Evidence pool = retrieval **∪** pending observations | The relevance floor can legitimately return nothing — and "no memory lexically matches this question" is *exactly* the case reflection exists to fix. Retrieval-only would disable the feature precisely when it is needed. |
+| Reflection's own retrieval passes `touch=false` | Recency refresh is right for recall the *user* asked for. Reflection issues a burst of internal queries; letting those refresh whatever they hit would hand its intermediate results a recency advantage in the next real recall. |
+| Runs from **`/api/reflect`**, not `/api/turn` | 1 + N LLM calls. The client fires it after the agent stops speaking — while the candidate is thinking or answering. That is the only window in a voice loop where a slow agent is genuinely free. No-op cost measured at **3–6 ms** (one indexed SQLite query), so firing every turn is fine. |
+
+### Two bugs, both found by running it rather than reading it
+1. **The questions regenerate each other's insights.** Six observations produced *"shows nervousness
+   under pressure"* three times — once per question. Exact repeats were caught by #8's text dedupe;
+   near-repeats were not. Measured on the pairs it actually emitted: a restatement and its `…under
+   pressure` variant share **0.83** content-word Jaccard, while genuinely distinct insights from the
+   same six observations share **0.06–0.11**. An order of magnitude of gap, so a 0.6 threshold only
+   has to land inside it. (A cross-encoder is the principled tool and is already loaded — not worth
+   a round-trip per insight for a distinction this stark.)
+2. **Reflections cited themselves.** Writing a reflection changes the corpus, so the *next* question's
+   retrieval returned it as a candidate and the model cited it as evidence for a near-identical
+   reflection, thirty seconds old. Reflections citing reflections is the paper's tree and is wanted;
+   a cycle citing its own output is circular. Ids written during a cycle are now excluded from that
+   cycle's pool.
+
+### Measured (`scripts/reflect-demo.mjs` — two arms, identical observations, one reflects)
+Raw cross-encoder logits, best candidate per arm (floor = −9.0):
+
+| query | best observation | best reflection | Δ |
+|---|---|---|---|
+| "is the candidate nervous under pressure?" | **−11.29** ∅ | **+8.69** ✅ | ~20 logits |
+| "how does the candidate handle being unsure?" | **−10.94** ∅ | −3.91 ✅ | ~7 |
+| "is the candidate stronger at practical or theoretical work?" | **−11.36** ∅ | **+4.63** ✅ | ~16 |
+
+**3/3 trait queries went from returning nothing to returning the right answer.** Same retriever,
+same thresholds, same observations — the reflection layer is the only variable. The −11.36 row is
+the exact failure #8 documented and could not fix.
+
+Cycle cost: **14–16 s** for 3 questions → 6–7 insights, entirely off the voice path.
+
+### ⚠️ Owed
+The insights above are *judged correct by reading them*, which is the same anecdote-grade evidence
+#8 warned about — n=1 corpus, one model, no baseline for what a bad insight would look like. The
+in-domain eval (still owed) must cover reflection too: whether insights are **faithful** to their
+cited evidence, and whether they *displace* observations they shouldn't. Reflections default to
+importance 7 and so start with a structural ranking advantage that has never been justified with a
+number.
 
 ---
 

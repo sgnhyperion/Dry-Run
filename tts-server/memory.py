@@ -24,6 +24,7 @@ Components are min-max normalized per query, because raw cross-encoder logits, a
 [0,1], and a 1-10 rating share no scale.
 """
 
+import json
 import math
 import sqlite3
 import time
@@ -60,6 +61,19 @@ RECENCY_DECAY = 0.995
 W_RELEVANCE, W_RECENCY, W_IMPORTANCE = 3.0, 1.0, 1.0
 
 
+# ── reflection trigger ────────────────────────────────────────────────────────
+# The paper fires reflection when the summed importance of recent observations crosses a
+# threshold (150 over ~100 memories, in their setup). The mechanism is what matters, not the
+# constant: reflection should be driven by how much has HAPPENED, not by a turn counter, so a
+# session full of mundane exchanges doesn't trigger one and a session with three revealing
+# answers does.
+#
+# Ours is scaled to an interview: ~1 observation per turn, importance typically 4-7, so 30
+# lands around 5-7 substantive turns — roughly the point where there is something to generalize
+# ABOUT. Below that, reflection would just restate single observations in longer words.
+REFLECTION_IMPORTANCE_THRESHOLD = 30
+
+
 @dataclass
 class Memory:
     id: str
@@ -70,6 +84,10 @@ class Memory:
     importance: int  # 1-10
     created_at: float
     last_accessed_at: float
+    # Ids of the memories a reflection was derived from. The paper keeps these pointers so a
+    # reflection is auditable back to evidence, and so reflections can be reflected ON — the
+    # tree deepens instead of flattening into a pile of unsourced opinions. NULL for observations.
+    evidence: str | None = None
 
 
 def _connect() -> sqlite3.Connection:
@@ -97,9 +115,16 @@ def init_db() -> None:
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_user ON memories(user_id)")
 
+        # CREATE TABLE IF NOT EXISTS does nothing to a table that already exists, so a new
+        # column has to be added explicitly or every existing dev database breaks on the next
+        # write. Checked rather than try/except so an unrelated OperationalError still raises.
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(memories)")}
+        if "evidence" not in columns:
+            conn.execute("ALTER TABLE memories ADD COLUMN evidence TEXT")
+
 
 def add(user_id: str, text: str, importance: int, kind: str = "observation",
-        session_id: str | None = None) -> str:
+        session_id: str | None = None, evidence: list[str] | None = None) -> str:
     now = time.time()
 
     # Dedupe on exact text. The analyst re-reads a window of the transcript each turn, so a
@@ -116,10 +141,15 @@ def add(user_id: str, text: str, importance: int, kind: str = "observation",
 
     memory_id = str(uuid.uuid4())
     with _connect() as conn:
+        # Columns named explicitly, not positionally — the schema gained `evidence` after the
+        # first version shipped, and a positional INSERT silently shifts every value when it does.
         conn.execute(
-            "INSERT INTO memories VALUES (?,?,?,?,?,?,?,?)",
+            """INSERT INTO memories
+               (id, user_id, session_id, kind, text, importance, created_at, last_accessed_at, evidence)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
             (memory_id, user_id, session_id, kind, text,
-             max(1, min(10, int(importance))), now, now),
+             max(1, min(10, int(importance))), now, now,
+             json.dumps(evidence) if evidence else None),
         )
     _INDEX_CACHE.pop(user_id, None)  # corpus changed — rebuild on next search
     return memory_id
@@ -312,3 +342,46 @@ def search(user_id: str, query: str, k: int = 5, candidates: int = 30,
     if touch:
         _touch([m["id"] for m in ranked])
     return ranked
+
+
+# ── reflection ────────────────────────────────────────────────────────────────
+# Reflection is the half of the memory stream that turns a log into an understanding. The
+# LLM calls themselves live in the Node side (src/lib/reflection.ts) — this module owns the
+# trigger and the evidence, so the Python service never grows a second provider integration.
+
+
+def since_last_reflection(user_id: str) -> list[Memory]:
+    """Observations written since the most recent reflection.
+
+    Scoped this way rather than "the last N memories" (the paper's framing) so the same
+    material is never reflected on twice. The paper can afford the overlap — its agents run
+    for simulated days and the window slides past old memories naturally. An interview is
+    short enough that a fixed window would still be looking at the same five observations on
+    the second reflection, producing near-duplicate insights that then compete for retrieval
+    slots against the originals.
+    """
+    with _connect() as conn:
+        last = conn.execute(
+            "SELECT MAX(created_at) AS t FROM memories WHERE user_id = ? AND kind = 'reflection'",
+            (user_id,),
+        ).fetchone()
+        cutoff = last["t"] or 0.0
+        rows = conn.execute(
+            """SELECT * FROM memories
+               WHERE user_id = ? AND kind = 'observation' AND created_at > ?
+               ORDER BY created_at""",
+            (user_id, cutoff),
+        ).fetchall()
+    return [Memory(**dict(r)) for r in rows]
+
+
+def reflection_state(user_id: str) -> dict:
+    """Whether enough has accumulated to be worth reflecting on, and the raw material if so."""
+    pending = since_last_reflection(user_id)
+    accumulated = sum(m.importance for m in pending)
+    return {
+        "should_reflect": accumulated >= REFLECTION_IMPORTANCE_THRESHOLD,
+        "accumulated_importance": accumulated,
+        "threshold": REFLECTION_IMPORTANCE_THRESHOLD,
+        "pending": [{"id": m.id, "text": m.text, "importance": m.importance} for m in pending],
+    }

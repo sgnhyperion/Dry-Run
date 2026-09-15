@@ -55,6 +55,7 @@ class MemoryAdd(BaseModel):
     importance: int = 5
     kind: str = "observation"
     session_id: str | None = None
+    evidence: list[str] | None = None
 
 
 class MemorySearch(BaseModel):
@@ -80,8 +81,20 @@ def memory_add(req: MemoryAdd):
         importance=req.importance,
         kind=req.kind,
         session_id=req.session_id,
+        evidence=req.evidence,
     )
     return {"id": memory_id}
+
+
+@app.get("/memory/reflection-state")
+def memory_reflection_state(user_id: str):
+    """Has enough happened to be worth reflecting on?
+
+    The trigger lives here because it is a property of the corpus, not of the conversation:
+    it survives reloads and spans sessions, which a client-side turn counter would not.
+    The LLM calls that consume this run on the Node side — see src/lib/reflection.ts.
+    """
+    return memory_store.reflection_state(user_id)
 
 
 @app.post("/memory/search")

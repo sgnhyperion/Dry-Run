@@ -20,6 +20,7 @@ export default function InterviewPage() {
   const [provider, setProvider] = useState("");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [recalled, setRecalled] = useState<RecalledMemory[]>([]);
+  const [reflections, setReflections] = useState<string[]>([]);
   const [speaking, setSpeaking] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
@@ -138,6 +139,27 @@ export default function InterviewPage() {
     } finally {
       setThinkingBoth(false);
       abortRef.current = null;
+
+      // Reflection runs HERE — after the turn is done and the agent is talking or the
+      // candidate is thinking. Deliberately not awaited and deliberately not inside
+      // /api/turn: it is 1 + N LLM calls, and this is the only point in the loop where
+      // that is free. Most calls return immediately without inferring anything, because
+      // the trigger is a summed-importance threshold on the server (see lib/reflection.ts).
+      const uid = userIdRef.current;
+      if (uid) {
+        fetch("/api/reflect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: uid }),
+        })
+          .then((r) => r.json())
+          .then((r: { reflected?: boolean; insights?: { text: string }[] }) => {
+            if (r.reflected && r.insights?.length) {
+              setReflections((prev) => [...r.insights!.map((i) => i.text), ...prev].slice(0, 6));
+            }
+          })
+          .catch(() => {});
+      }
     }
   }, []);
 
@@ -315,7 +337,13 @@ export default function InterviewPage() {
         </div>
 
         <aside className="hidden min-h-0 flex-col lg:flex">
-          <LatencyPanel timings={timings} provider={provider || "—"} analysis={analysis} recalled={recalled} />
+          <LatencyPanel
+            timings={timings}
+            provider={provider || "—"}
+            analysis={analysis}
+            recalled={recalled}
+            reflections={reflections}
+          />
         </aside>
       </div>
     </main>
@@ -351,11 +379,13 @@ function LatencyPanel({
   provider,
   analysis,
   recalled,
+  reflections,
 }: {
   timings: TurnTimings | null;
   provider: string;
   analysis: Analysis | null;
   recalled: RecalledMemory[];
+  reflections: string[];
 }) {
   const rows = [
     { label: "STT", value: timings?.sttMs, hint: "speech → text" },
@@ -418,6 +448,21 @@ function LatencyPanel({
             {recalled.map((m, i) => (
               <li key={i} className="text-[11px] leading-snug text-zinc-300">
                 <span className="font-mono text-cyan-400/70">{m.score.toFixed(2)}</span> {m.text}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {reflections.length > 0 && (
+        <div className="mt-4 rounded-xl border border-violet-400/20 bg-violet-500/10 p-3">
+          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-violet-300">
+            Reflections ({reflections.length})
+          </p>
+          <ul className="mt-1.5 space-y-1.5">
+            {reflections.map((text, i) => (
+              <li key={i} className="text-[11px] leading-snug text-zinc-300">
+                {text}
               </li>
             ))}
           </ul>

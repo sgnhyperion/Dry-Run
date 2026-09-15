@@ -81,13 +81,24 @@ cross-encoder rerank) scored by relevance + recency-decay + LLM-rated importance
 (~15ms warm, on the critical path, measured). The corpus is **self-generating** — the analyst emits the
 observations. Full reasoning + the four bugs found → `decisions.md` **#8**.
 
-**▶ NEXT, in order:** (1) **reflection** — it fixes a *measured* retrieval failure, and it changes what's
-in the corpus, so evaluating before it means evaluating twice; (2) the **in-domain retrieval eval**, which
-replaces every guessed threshold with a measured one; (3) streaming STT (the last big latency win, and what
-would make "full-duplex" true).
+**▶ REFLECTION BUILT (2026-09-15) — and it closes #8's open failure.** The agent now periodically asks
+itself what the salient questions about this candidate are, answers them from its own observations, and
+stores the answers as memories with pointers back to their evidence (Generative Agents §4.2). Triggered by
+accumulated importance, run off the voice path from `/api/reflect`. Full reasoning → `decisions.md` **#9**.
 
-**Owed:** human-speech WER eval for STT (#6); retrieval eval (#8) — every threshold there is currently a
-guess set by reading score distributions across five memories.
+**The measurement (`scripts/reflect-demo.mjs`, two arms, identical observations, one reflects):** three
+trait-level queries that returned **nothing** over raw observations all return the right answer with
+reflections in the corpus. Cross-encoder logits for the best candidate: −11.29 → **+8.69**, −10.94 → −3.91,
+−11.36 → **+4.63**. That last row is the exact failure #8 documented and could not fix. Same retriever,
+same thresholds, same observations — reflection is the only variable.
+
+**▶ NEXT, in order:** (1) the **in-domain retrieval eval** — now with reflection in scope, so it measures
+insight *faithfulness* to cited evidence and whether reflections wrongly displace observations, on top of
+replacing every guessed threshold; (2) streaming STT (the last big latency win, and what would make
+"full-duplex" true).
+
+**Owed:** human-speech WER eval for STT (#6); retrieval + reflection eval (#8, #9) — every threshold in
+both is currently a guess, and reflections default to importance 7 with no number behind it.
 
 ## Key locked decisions (see `/DRY_RUN.md` for full rationale)
 - Product: **Dry Run** — affective, self-improving AI technical interviewer (voice + 3D avatar).
