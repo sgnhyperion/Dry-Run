@@ -141,8 +141,8 @@ and the reason #5 extends it to the brain.
 
 ---
 
-## #4 — Gemini project denied access (403) — forced provider re-evaluation  ⚠️
-**Date:** 2026-09-03 · **Phase:** 1.x · **Status:** ⚠️ open — blocking the brain
+## #4 — Gemini project denied access (403) — forced provider re-evaluation  ✅
+**Dates:** 2026-09-03 (onset) · 2026-09-10 (**resolved, self-healed**) · **Phase:** 1.x · **Status:** ✅ closed — transient, hypothesis falsified
 
 **Event.** `POST /api/interview` began failing with **HTTP 403 `permission_denied`**:
 `"Your project has been denied access. Please contact support."`
@@ -170,6 +170,40 @@ consistent with the hypothesis. **Cheapest test: mint a key from a personal Gmai
 **Strategic read.** This is the **second** free-tier wall in two milestones — 429s killed Gemini TTS in #3,
 a 403 now kills the brain. The pattern is the argument for #5, and for eventually funding the Anthropic path
 that `DRY_RUN.md` locked from the start. `@anthropic-ai/sdk` is already in `package.json`.
+
+### Resolution (2026-09-10) — self-healed; the hypothesis was **wrong**
+Re-ran the identical bisect **seven days later, with no action taken** — same `AQ.`-prefixed 53-char key, same
+Workspace-managed project, no new key minted, no support ticket:
+
+| Request | 2026-09-03 | 2026-09-10 |
+|---|---|---|
+| `GET /v1beta/models` | 200 | **200** |
+| `gemini-3.6-flash:generateContent` | — | **200** — real reply returned |
+| `POST /v1beta/interactions` (`gemini-3.6-flash`) ← *the call `askBrain()` makes* | **403 denied** | **200** — `status:"completed"` + id |
+| `gemini-2.5-flash` | 404 "not available to new users" | now **listed** in the catalog again |
+
+**Conclusion. The 403 was a transient provider-side denial, NOT Google Workspace org policy.** The
+"`@scalerailabs.com` org blocks generative APIs" hypothesis is **falsified**: org policy does not lapse by
+itself, and the key that supposedly violated it now serves inference unchanged. The `AQ.`-vs-`AIza…` key-format
+reasoning was **correlation, not cause** — the newer console-issued format works fine.
+
+**⚠️ The diagnostic lesson (worth more than the fix).** The bisect correctly localized the fault to
+*provider-side, not code* — that part was rigorous and right. The error was going one step further and naming a
+**specific permanent cause** from **circumstantial evidence** (key prefix + account domain), then writing a
+remediation ("mint a personal-Gmail key") against it. A 403 with a generic vendor message is **under-determined**:
+transient infra denial and permanent policy denial are indistinguishable from the response alone. **The cheapest
+test was never "mint a new key" — it was "wait and re-run the same curl."** Rule going forward: for an opaque
+provider-side failure, **re-test before remediating**, and record hypotheses as hypotheses, not as findings.
+
+**What survives.** The *strategic* read above still stands on its own merits — free-tier walls (TTS 429s in #3)
+are a real recurring risk, and #5's provider-agnostic seam is still the right Phase-2 move. But it is **no longer
+forced by an outage**: the Gemini brain is serving, so #5 stays deliberately deferred to Phase 2 as designed,
+driven by the memory refactor rather than by an emergency.
+
+**Live observation to carry into tuning.** The resolution trace showed **462 thought tokens for a 7-token reply**
+(`total_thought_tokens: 462`, `total_output_tokens: 7`). `gemini-3.6-flash` reasons by default. This compounds
+#3's headline finding — **the brain, not TTS, is the latency bottleneck** — and is the first place to look when
+tightening interviewer turn latency.
 
 ---
 
@@ -221,6 +255,164 @@ askBrain(messages) → { text }      ← stateless, provider-agnostic
 **Eval owed when built** (→ future entry #6): local vs hosted on **persona adherence** (does it ask exactly one
 question / avoid revealing answers), **latency**, and **cost**. Same discipline as #3 — fixed prompt set,
 median of N, honest failure counts.
+
+---
+
+## #6 — Voice IN: **self-hosted `faster-whisper`** + push-to-talk · **Pipecat/LiveKit deferred to Phase 6**  ✅
+**Date:** 2026-09-10 · **Phase:** 1.5 · **Status:** ✅ adopted — Phase 1 talking spine now closed both ways
+
+**Context.** Milestone 1.5 is the last open item in Phase 1: the candidate must *speak* and be understood.
+
+**The doc contradiction that had to be resolved first.** `DRY_RUN.md` said two incompatible things:
+§3.3, §3.4 (MVP screen), §9 Phase 1 and §9 Phase 6 all specify **push-to-talk in v1, barge-in in Phase 6** —
+while §6 "Decided" said **adopt Pipecat/LiveKit now, with VAD and barge-in from the start, *not* push-to-talk**.
+`phase-1.md` had inherited the §6 version, so the plan of record for 1.5 was a full real-time framework migration.
+
+**Decision — go with the 4-to-1 majority: push-to-talk now, framework deferred to Phase 6.** A Pipecat/LiveKit
+adoption is the largest remaining Phase-1 cost and, by this project's own stated bar (*"implementing research
+papers, training real models … not gluing together API calls"*), the **lowest resume value in the roadmap** —
+it is framework integration, not applied AI. Critically, **it blocks nothing**: memory, the judge model, SER,
+Reflexion and the eval harness are all reachable with turn-based audio. §6 has been corrected in place.
+
+**Options for the STT engine itself.**
+| Option | Verdict |
+|---|---|
+| Browser Web Speech API | ❌ still out — quality varies by browser, and it was already ruled out |
+| Deepgram / AssemblyAI free tier | ❌ a **third** free-tier dependency after #3's 429s and #4's 403. Not paying that tax again for a component we can self-host |
+| **Self-hosted `faster-whisper`** | ✅ **adopted** — $0, offline, no quota, no account |
+
+**Decision — `faster-whisper` (`small.en`, `compute_type="int8"`, CPU) served from the FastAPI service we
+already run.** `small.en` over `base.en` because technical jargon punishes the smaller models; `int8` CPU
+because ctranslate2 has no Metal/MPS backend. `beam_size=1` (greedy) roughly halves latency at negligible WER
+cost here, and `vad_filter=True` strips the silence push-to-talk recordings are full of — which both cuts
+latency and stops Whisper hallucinating text into dead air.
+
+**The structural win.** This did **not** add a service. `tts-server/` already hosts Kokoro, and `DRY_RUN.md`
+already slates that Python service to host **embeddings (Phase 2), the SER model (Phase 4), and the judge
+(Phase 3)**. Adding `/stt` turns it into the ML backbone it was always going to become — same process, same
+load-once-at-import pattern, one extra endpoint. Phase 1.5 cost ~an afternoon on proven infrastructure instead
+of a framework migration.
+
+**Measurements** (TTS→STT round-trip; Kokoro synthesises known ground truth, Whisper transcribes it back):
+| Utterance | Audio | Transcribe | RTF | Transcript |
+|---|---|---|---|---|
+| "…variational autoencoder and a GAN?" | 5.03 s | 1.90 s | **0.378** | exact, bar `auto-encoder` hyphenation |
+| "What is the time complexity of your solution?" | 2.98 s | 0.79 s | **0.266** | **exact** |
+| "Walk me through how you would handle a hash collision." | 3.25 s | 0.81 s | **0.248** | **exact** |
+
+**⚠️ Honest limitation — this is a smoke test, not a WER number.** The audio is *synthetic* (Kokoro), so it is
+clean, unaccented, and free of room noise and disfluency. It proves the pipeline works and bounds the latency;
+it says nothing reliable about accuracy on real human speech. **A real eval on human audio is owed** before
+any accuracy claim — same discipline as #3.
+
+**Verified end-to-end** through the real Next.js routes: audio → `/api/stt` → `/api/interview` → `/api/tts` →
+audio, transcript word-perfect, TTS reply in 0.41 s.
+
+**Implementation notes.**
+- **Raw bytes, not `multipart/form-data`** — skips the `python-multipart` dependency and an encoding round-trip;
+  the browser's `MediaRecorder` Blob POSTs directly. PyAV (bundled with faster-whisper) demuxes whatever
+  container the browser picked — webm/opus on Chrome, mp4 on Safari — so the client never has to normalise.
+- **`speechToText()` seam** in `src/lib/ears.ts`, mirroring `textToSpeech()`. It handles **both** failure
+  shapes: `fetch` **throws** on a dead daemon and only returns `!res.ok` for HTTP errors — the exact gap #5
+  flagged in `voice.ts`. A `!res.ok` guard alone would miss "the server isn't running", the likeliest local failure.
+- **One send path.** `sendAnswer(answer)` takes the text explicitly instead of reading `message` state, because
+  the voice path sends a transcript that was never in the textarea and `setState` is async — staging it there
+  would have sent a stale value. Text and voice now converge on identical logic.
+- **`MediaRecorder` flushes asynchronously.** The final chunk only lands after `stop` fires, so the Blob must be
+  assembled inside `onstop`; reading the chunk array synchronously after `stop()` silently truncates every
+  recording's tail.
+- **The user's audio is now captured** — which is exactly the input **Phase 4's SER model** needs. Nothing to
+  re-plumb when affect lands.
+
+**Consequences.** Phase 1 is functionally complete. Deferred by choice: streaming/barge-in (Phase 6), and a
+real human-speech WER eval before any accuracy claim is made.
+
+---
+
+## #7 — Streaming, pipelined voice turns + multi-agent orchestration  ✅
+**Date:** 2026-09-14 · **Phase:** pivot (pulled Phase 6 forward) · **Status:** ✅ adopted
+
+**Context — a target change, not a technical one.** ShortLoop (voice AI platform, thousands of calls
+daily) reached out about their founding team. Their stated stack: *real-time multi-agent orchestration,
+streaming voice, context engineering, latency*. Dry Run's roadmap optimised for a different audience —
+research-y AI labs — and **#6 had deferred exactly the wrong thing**, moving streaming and barge-in to
+Phase 6 on the grounds that they were "the lowest resume value — framework integration, not applied AI."
+For this target that judgement **inverts**: streaming and latency *are* the product.
+
+**Decision.** Pull Phase 6 forward. Rebuild the turn as a streaming, pipelined, multi-agent pipeline with
+the latency budget measured rather than asserted. Phase 2 (memory) still maps to their "context
+engineering", so it stays on the roadmap rather than being discarded.
+
+### The change: blocking → pipelined
+The old turn was three blocking stages — brain writes everything → TTS synthesises everything → audio
+plays. Time-to-first-audio was the sum. Now the stages overlap: tokens stream, a chunker cuts a speakable
+sentence the instant one completes, and that sentence's synthesis starts while the model keeps writing.
+
+Two invariants make it safe: TTS jobs **start** eagerly and a separate consumer drains them *while*
+generation continues; audio is **emitted** strictly in order, because speech played out of order is worse
+than speech played late. Concurrency lives in when work starts, never in when it's sent.
+
+### Measured (`scripts/bench-latency.mjs`)
+A `mode` flag reproduces the old blocking path, so both arms run through **identical** code, models, and
+hardware — the delta is attributable to the pipelining and nothing else. Ollama `qwen2.5:14b` + Kokoro,
+3 runs/prompt, median, one warmup turn discarded:
+
+| prompt | sequential TTFA | pipelined TTFA | saved | speedup |
+|---|---|---|---|---|
+| short ack | 3110 ms | **784 ms** | 2326 ms | **3.97×** |
+| normal answer | 2055 ms | **546 ms** | 1509 ms | **3.76×** |
+| long multi-part reply | 5686 ms | **3398 ms** | 2288 ms | **1.67×** |
+
+**Mean TTFA speedup: 3.13×.** Total turn time did **not** regress (5669 → 4937 ms on the long reply),
+which rules out the obvious failure mode of improving TTFA by pushing work later.
+
+Headline metric is deliberately **time-to-first-audio, not total** — a voice agent is judged on when it
+starts talking, not when it stops. Total is reported anyway so a regression there stays visible.
+
+### Multi-agent: split by latency class, not by topic
+- **Interviewer** — critical path. Streamed, chunked, spoken.
+- **Analyst** — off the critical path. Scores the answer, steers the **next** turn via a compiled
+  directive injected into the interviewer's context. The interviewer never sees the raw analysis.
+
+**🔑 The finding worth more than the feature: "not awaited" is not the same as "free".**
+| Configuration | Time-to-first-audio |
+|---|---|
+| no analyst | ~1463 ms |
+| analyst concurrent, **same** local model | **4307 ms** — plain CPU contention |
+| analyst concurrent, **smaller** model | **56 000 ms** on one turn — Ollama evict-and-reload |
+| analyst **deferred** until audio is sent | ~728–1690 ms (restored) |
+
+Tiering the analyst to a smaller model — the obvious fix for contention — made it dramatically *worse*,
+because Ollama holds one model at a time unless `OLLAMA_MAX_LOADED_MODELS` is raised on the daemon, and a
+model swap costs far more than the contention it was avoiding. So **scheduling is deployment-aware**:
+hosted providers run the analyst concurrently (separate infra, concurrency genuinely free); a single local
+Ollama defers it until the audio is out. Both keep it off the critical path; only the contention differs.
+
+### Other decisions folded in
+- **Stateless brain** — dropped Gemini's server-side `previous_interaction_id` for a caller-owned
+  transcript. This is **#5's deferred refactor, now done**: three adapters (openai · gemini · ollama)
+  behind one seam, persona outside the adapters. It's also the precondition for context engineering —
+  you cannot compact, re-rank, or inject retrieved memory into a context window the provider hides.
+- **Gemini thinking budget bounded to 128.** It burned a measured 462 thought tokens on a 7-token reply,
+  all dead air. Budget `0` is **rejected** by `gemini-3.6-flash` (400 INVALID_ARGUMENT, verified by
+  bisect) — it can bound reasoning, not disable it.
+- **Guardrail on structured output.** A 4/10 answer returned `nextMove: "go_deeper"`, compiling into a
+  directive that told the interviewer the candidate did well. When two fields of an LLM's JSON
+  contradict each other, the score wins. Don't trust structured output against other available signal.
+- **Client schedules audio on the AudioContext clock** rather than chaining `onended`, which inserted an
+  audible gap between every sentence.
+- **Barge-in** stops scheduled-but-unstarted sources too — by the time a user interrupts, several
+  sentences may already be queued into the future — and aborts the request so the server stops generating.
+- **`voice.ts` now throws** instead of returning a `Response` from its catch, which had forced callers to
+  `instanceof`-sniff the result. (Flagged twice before; fixed now that the orchestrator depends on it.)
+
+### Open / owed
+- **OpenAI is wired but unverified** — the key in the environment is rejected (`sk-svcac…`, a service
+  account key). Everything above was measured on **Ollama**. Numbers on a hosted provider will differ,
+  and the concurrent-analyst path in particular has never run.
+- **The client has not run in a browser.** It typechecks and builds; the server pipeline is verified end
+  to end by curl. The Chrome extension was unavailable to drive a real page.
+- Human-speech WER eval for STT still owed from #6.
 
 ---
 

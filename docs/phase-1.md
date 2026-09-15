@@ -23,7 +23,24 @@ Built incrementally so each step is visible and understood (teach + pair mode).
   - Learn: Messages API, system prompts, streaming, adaptive thinking/effort, model tiering.
 - [ ] **1.4 — Voice out (TTS).** Claude's reply → speech → feeds 1.2's lip-sync.
   - Learn: TTS provider (Google Cloud TTS vs Kokoro), audio streaming to the browser.
-- [ ] **1.5 — Real-time loop.** Wire **Pipecat/LiveKit** for streaming voice-in + barge-in; close the circle.
+- [x] **1.5 — Voice IN (STT).** ✅ **DONE 2026-09-10.** Push-to-talk mic → `faster-whisper` on the local
+  FastAPI service → transcript → the existing brain path. **The Phase-1 spine is now closed both ways.**
+  - **Scope corrected:** this milestone previously read "wire Pipecat/LiveKit for streaming + barge-in",
+    inherited from a `DRY_RUN.md` §6 line that **contradicted four other places** in the same doc (all of which
+    say push-to-talk in v1, barge-in in Phase 6). Resolved in favour of the majority; §6 corrected in place.
+    **Pipecat/LiveKit + barge-in → Phase 6.** Full reasoning + measurements → `decisions.md` #6.
+  - **Built:** `/stt` endpoint on `tts-server/server.py` (`small.en`, int8 CPU, greedy, `vad_filter`) ·
+    `src/lib/ears.ts` (`speechToText()` seam, mirrors `textToSpeech()`) · `src/app/api/stt/route.ts` ·
+    `src/lib/useRecorder.ts` (push-to-talk `MediaRecorder` hook) · mic button + Recording/Transcribing states
+    on `/interview`.
+  - **Measured:** RTF **0.25–0.38**, transcripts exact on a TTS→STT round-trip. ⚠️ Synthetic audio — a smoke
+    test, **not** a WER number. Real human-speech eval still owed.
+  - **Refactor that mattered:** `handleSend` → `sendAnswer(answer)` taking text explicitly. The voice path
+    sends a transcript that was never in the textarea, and `setState` is async — staging it there would have
+    sent a stale value. Text and voice now share one send path.
+  - **Phase-4 dividend:** the user's raw audio is now captured, which is exactly the SER model's input.
+
+- [ ] **1.6 (deferred to Phase 6) — Real-time loop.** Pipecat/LiveKit streaming + VAD + barge-in.
   - Learn: real-time voice agents, VAD, turn-taking/interruption, WebRTC/websocket transport.
 
 ## Prerequisites / credentials (grab in parallel, only when the milestone needs them)
